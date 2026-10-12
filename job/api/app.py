@@ -340,12 +340,7 @@ def config_bundle() -> dict:
 
 def _mask_key(key: str) -> str:
     """API Key 只回传掩码，明文留在本机数据库，不随接口回给浏览器。"""
-    key = key or ""
-    if not key:
-        return ""
-    if len(key) <= 8:
-        return "•" * len(key)
-    return f"{key[:3]}{'•' * 6}{key[-4:]}"
+    return "*" * 12 if (key or "").strip() else ""
 
 
 def _resolve_api_key(provided: str, *, base_url: str, current: LlmSettings) -> str:
@@ -787,16 +782,15 @@ async def analyze_jobs(body: UidsIn) -> dict:
 
 
 class CompanyScanIn(BaseModel):
-    """批量查企业入参：``uids`` 为空表示全部岗位；``only_missing`` 只补没查过的。"""
+    """批量查企业入参：要查的岗位 ID 列表。"""
 
     uids: list[str] = Field(default_factory=list)
-    only_missing: bool = False
 
 
 @app.post("/api/jobs/company-scan")
 async def company_scan_jobs(body: CompanyScanIn) -> dict:
-    """批量查企业背景：去重后逐家查询，跳过查过的（见 ``Runtime.company_scan``）。"""
-    return runtime.company_scan(list(body.uids), only_missing=body.only_missing)
+    """批量查企业背景：去重后逐家查询，跳过 7 天内查过的（见 ``Runtime.company_scan``）。"""
+    return runtime.company_scan(list(body.uids))
 
 
 @app.get("/api/jobs/export")
@@ -1138,17 +1132,20 @@ def apply_tasks(status: str = "") -> list[dict]:
 
 
 class ApplyTaskIn(BaseModel):
-    job_uid: str
+    job_uid: str = ""
     url: str = ""
 
 
 @app.post("/api/apply/task")
 async def apply_open(body: ApplyTaskIn) -> dict:
-    """建/取网申任务并打开企业官网，扫一遍表单返回字段对照表。"""
+    """建/取网申任务并打开企业官网，扫一遍表单返回字段对照表。
+
+    不带 ``job_uid`` 时按独立任务处理：用户只给网址，公司 / 岗位名从页面自己认。
+    """
     uid = (body.job_uid or "").strip()
-    if not uid:
-        raise ApiError("缺少岗位 uid")
     url = _apply_url(body.url)
+    if not uid and not url:
+        raise ApiError("请先填写企业官网的网申地址")
     runtime.push_log(f"网申：正在打开 {url or '上次填过的网申地址'}…")
     return await _apply_call("打开网申页面", lambda: runtime.apply_assistant.open_task(uid, url))
 

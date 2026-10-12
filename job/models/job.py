@@ -285,23 +285,6 @@ class JobRow(SQLModel, table=True):
         with db_session() as session:
             return list(session.exec(stmt).all())
 
-    @classmethod
-    def company_source(cls) -> list[dict[str, str]]:
-        """全部岗位的公司归属（批量查企业用）：平台、公司键字段与链接。"""
-        from job.models import db_session
-
-        with db_session() as session:
-            rows = session.exec(select(cls)).all()
-        return [
-            {
-                "uid": row.uid,
-                "platform": row.platform or "boss",
-                "company": row.company or "",
-                "brand_id": row.brand_id or "",
-                "link": row.link or "",
-            }
-            for row in rows
-        ]
 
     @classmethod
     def list_dicts(

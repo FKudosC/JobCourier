@@ -124,9 +124,6 @@ function SortHeader({
   );
 }
 
-// 自动补全公司背景只在本页首次挂载时触发一次（后端会跳过查过的，重复调用也安全）
-let autoBackfillStarted = false;
-
 export default function Jobs() {
   const { rt } = useRuntime();
   const [params, setParams] = useSearchParams();
@@ -174,20 +171,6 @@ export default function Jobs() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // 打开岗位页时自动补全「从没查过」的公司背景，无需手动逐个点。
-  useEffect(() => {
-    if (autoBackfillStarted) return;
-    autoBackfillStarted = true;
-    void api
-      .post<{ total: number }>("/api/jobs/company-scan", { uids: [], only_missing: true })
-      .then((res) => {
-        if (res.total > 0) toast.success(`正在自动补全 ${res.total} 家公司的背景查询`);
-      })
-      .catch(() => {
-        // 已在查询中或都查过了：静默忽略
-      });
-  }, []);
 
   useEffect(() => {
     const onEvent = (e: Event) => {
@@ -274,13 +257,8 @@ export default function Jobs() {
 
   async function scanCompanies(targets: string[]) {
     try {
-      // 没有选中岗位时 uids 为空 → 补全全部还没查过的公司
       const res = await api.post<{ total: number }>("/api/jobs/company-scan", { uids: targets });
-      toast.success(
-        targets.length === 0
-          ? `已开始补全 ${res.total} 家公司的背景`
-          : `已开始查询 ${res.total} 家公司的背景`,
-      );
+      toast.success(`已开始查询 ${res.total} 家公司的背景`);
     } catch (err) {
       toast.error((err as Error).message);
     }

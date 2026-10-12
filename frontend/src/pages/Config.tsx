@@ -58,11 +58,11 @@ import {
 
 const RESUME_ACCEPT = ".pdf,.docx,.jpg,.jpeg,.png,.bmp,.webp";
 const CUSTOM = "自定义";
-const DEFAULT_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
-/** API Key 不回显明文：已保存时输入框留空，提交空串由后端沿用旧 Key。 */
+/** API Key 只回显掩码，明文留在本机；提交掩码或空串时后端沿用已存的 Key。 */
 function toLlmForm(llm: Llm): LlmForm {
-  return { base_url: llm.base_url, api_key: "", key_set: llm.key_set, model: llm.model };
+  return { base_url: llm.base_url, api_key: llm.api_key, key_set: llm.key_set, model: llm.model };
 }
 
 function toForm(b: Bundle): SearchForm {
@@ -1118,7 +1118,7 @@ export default function Config() {
                   <div className="g-divided">
                     <Row
                       label="1. 接口地址"
-                      hint="留空使用 DeepSeek；支持任意 OpenAI 兼容接口，例如通义千问、Kimi、智谱、OpenAI 或本地 Ollama。"
+                      hint="支持任意 OpenAI 兼容接口，包括本地 Ollama。"
                     >
                       <DelayInput
                         value={llmForm.base_url}
@@ -1131,20 +1131,12 @@ export default function Config() {
 
                     <Row
                       label="2. API Key"
-                      hint={
-                        llmForm.key_set
-                          ? "已保存在本机，界面上不回显（留空即保持不变）；填入新值可替换。"
-                          : "API Key 仅保存在本机，不会上传到任何服务器。"
-                      }
+                      hint="API Key 仅保存在本机，不会上传到任何服务器。"
                     >
                       <DelayInput
                         value={llmForm.api_key}
                         onCommit={(v) => saveLlm({ api_key: v })}
-                        placeholder={
-                          llmForm.key_set
-                            ? "已保存 ••••••（留空不改动）"
-                            : "粘贴该服务的 API Key，DeepSeek 以 sk- 开头"
-                        }
+                        placeholder="粘贴该服务的 API Key"
                         width="100%"
                         type="password"
                         delay={700}

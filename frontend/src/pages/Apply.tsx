@@ -6,7 +6,6 @@ import {
   FileInput,
   Plus,
   RefreshCw,
-  Search,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -22,10 +21,9 @@ import {
   GhostButton,
   Modal,
   PrimaryButton,
-  SectionTitle,
   SoftButton,
   Spinner,
-  useDebouncedValue,
+  TextInput,
 } from "../ui";
 
 /** 筛选下拉的显示文字 → 后端状态值。 */
@@ -37,19 +35,12 @@ const STATUS_FILTERS: Record<string, string> = {
   需人工: "failed",
 };
 
-interface JobOption {
-  uid: string;
-  title: string;
-  company: string;
-  salary: string;
-  location: string;
-}
-
 export default function Apply() {
   const [tasks, setTasks] = useState<ApplyTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("全部状态");
-  const [forUid, setForUid] = useState("");
+  /** 当前打开的网申对话框：uid 为空表示还没建任务，只有用户粘的地址。 */
+  const [draft, setDraft] = useState<{ uid: string; url: string } | null>(null);
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState("");
 
@@ -119,13 +110,6 @@ export default function Apply() {
           </span>
         </div>
 
-        <Card pad="1.1rem 1.3rem">
-          <SectionTitle
-            title="网申助手"
-            hint="不少公司在 BOSS 上不挂 HR，简历发不过去，只能去企业官网的投递表单填一遍。这里负责把表单扫成对照表、代填内容，提交按钮永远留给你自己点。"
-          />
-        </Card>
-
         <Card pad="0" className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="g-scroll min-h-0 flex-1 overflow-y-auto">
             {loading && rows.length === 0 && (
@@ -137,7 +121,7 @@ export default function Apply() {
               <EmptyState
                 icon={<FileInput size={20} />}
                 title={tasks.length === 0 ? "还没有网申任务" : "这个状态下没有任务"}
-                hint="点「新建网申任务」挑一个岗位，把企业官网的表单页地址填进去即可。"
+                hint="点「新建网申任务」，把企业官网的投递表单页地址粘进来，程序会打开它、认出公司并扫出表单。"
                 action={
                   tasks.length === 0 ? (
                     <PrimaryButton onClick={() => setPicking(true)}>
@@ -158,7 +142,7 @@ export default function Apply() {
                     type="button"
                     className="t-label block max-w-full truncate text-left font-semibold"
                     style={{ color: "var(--ink)" }}
-                    onClick={() => setForUid(task.uid)}
+                    onClick={() => setDraft({ uid: task.uid, url: "" })}
                   >
                     {task.title || "（无标题）"}
                   </button>
@@ -189,7 +173,7 @@ export default function Apply() {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <SoftButton onClick={() => setForUid(task.uid)}>
+                  <SoftButton onClick={() => setDraft({ uid: task.uid, url: "" })}>
                     <FileInput size={13} /> 填表
                   </SoftButton>
                   <GhostButton
@@ -221,103 +205,65 @@ export default function Apply() {
         </Card>
       </div>
 
-      <JobPicker
+      <NewTaskDialog
         open={picking}
         onOpenChange={setPicking}
-        onPick={(uid) => {
+        onCreate={(url) => {
           setPicking(false);
-          setForUid(uid);
+          setDraft({ uid: "", url });
         }}
       />
 
       <ApplyDialog
-        open={!!forUid}
-        onOpenChange={(v) => !v && setForUid("")}
-        uid={forUid}
+        open={!!draft}
+        onOpenChange={(v) => !v && setDraft(null)}
+        uid={draft?.uid ?? ""}
+        initialUrl={draft?.url ?? ""}
         onChanged={() => void load()}
       />
     </PageShell>
   );
 }
 
-/** 挑岗位：搜索已有的岗位库，选中后进网申对话框填地址。 */
-function JobPicker({
+/** 新建网申任务：只问企业官网的表单页地址，公司 / 岗位名由程序从页面上认。 */
+function NewTaskDialog({
   open,
   onOpenChange,
-  onPick,
+  onCreate,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onPick: (uid: string) => void;
+  onCreate: (url: string) => void;
 }) {
-  const [search, setSearch] = useState("");
-  const debounced = useDebouncedValue(search);
-  const [rows, setRows] = useState<JobOption[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [url, setUrl] = useState("");
 
   useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    const qs = new URLSearchParams({
-      search: debounced,
-      analysis: "全部分析状态",
-      suitable: "全部",
-      page: "1",
-      page_size: "20",
-    });
-    api
-      .get<{ rows: JobOption[] }>(`/api/jobs?${qs.toString()}`)
-      .then((res) => setRows(res.rows ?? []))
-      .catch((err) => toast.error((err as Error).message))
-      .finally(() => setLoading(false));
-  }, [open, debounced]);
+    if (open) setUrl("");
+  }, [open]);
+
+  const ready = /^https?:\/\/\S+$/i.test(url.trim());
 
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title="选择要网申的岗位"
-      description="从岗位库里挑一个，下一步填企业官网的投递表单地址。"
+      title="新建网申任务"
+      description="把企业官网的投递表单页地址粘进来，程序会打开它、认出这是哪家公司，并把表单扫成一张对照表。"
       width={560}
     >
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <Search size={14} style={{ color: "var(--faint)" }} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索岗位或公司"
-            className="g-field g-input w-full outline-none"
-          />
-        </div>
-        <div className="g-scroll flex max-h-[46vh] flex-col overflow-y-auto">
-          {loading && rows.length === 0 && (
-            <div className="flex justify-center py-10">
-              <Spinner size={16} />
-            </div>
-          )}
-          {!loading && rows.length === 0 && (
-            <span className="t-meta py-8 text-center" style={{ color: "var(--muted)" }}>
-              没有匹配的岗位
-            </span>
-          )}
-          {rows.map((job) => (
-            <button
-              key={job.uid}
-              type="button"
-              className="g-menu-item items-start"
-              onClick={() => onPick(job.uid)}
-            >
-              <span className="flex min-w-0 flex-col text-left">
-                <span className="t-label truncate font-semibold" style={{ color: "var(--ink)" }}>
-                  {job.title || "（无标题）"}
-                </span>
-                <span className="t-micro mt-0.5 truncate" style={{ color: "var(--muted)" }}>
-                  {[job.company, job.salary, job.location].filter(Boolean).join(" · ")}
-                </span>
-              </span>
-            </button>
-          ))}
+        <TextInput
+          value={url}
+          onChange={setUrl}
+          placeholder="https://公司官网/招聘/投递表单"
+        />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <PrimaryButton disabled={!ready} onClick={() => onCreate(url.trim())}>
+            <Plus size={13} /> 打开并扫描表单
+          </PrimaryButton>
+          <span className="t-micro" style={{ color: "var(--faint)" }}>
+            只支持 http:// 或 https:// 开头的地址
+          </span>
         </div>
       </div>
     </Modal>

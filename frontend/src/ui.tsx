@@ -395,14 +395,16 @@ export function Stat({
   value,
   unit,
   hint,
+  align = "left",
 }: {
   label: React.ReactNode;
   value: React.ReactNode;
   unit?: string;
   hint?: string;
+  align?: "left" | "center";
 }) {
   return (
-    <div className="flex min-w-0 flex-col">
+    <div className={`flex min-w-0 flex-col${align === "center" ? " items-center text-center" : ""}`}>
       <span className="t-micro font-semibold" style={{ color: FAINT, letterSpacing: "0.06em" }}>
         {label}
       </span>

@@ -193,7 +193,11 @@ class DeliveryEngine:
         detail: str | None = None,
         applied: bool = False,
     ) -> None:
-        """判断结果入库（统一走 JobRow.record，含平台与评分明细）。"""
+        """判断结果入库（统一走 JobRow.record，含平台与评分明细）。
+
+        岗位进入「岗位管理」时顺手把公司交给后台预查：不管合不合适，
+        入列的岗位都能很快在列表里看到企业风险（查企业不阻塞投递）。
+        """
         JobRow.record(
             job,
             suitable=suitable,
@@ -202,14 +206,22 @@ class DeliveryEngine:
             detail=detail,
             applied=applied,
         )
+        self.prefetch_company(job)
+
+    def prefetch_company(self, job: "Job") -> None:
+        """把岗位所属公司交给后台预查；没接预查器时什么都不做。"""
+        if self._prefetcher is not None:
+            self._prefetcher.schedule(
+                platform=self.platform, brand_id=job.brand_id, name=job.company, link=job.link
+            )
 
     # --- 决策链三段 ---
 
     async def admit(self, job: "Job") -> "Job | None":
         """投递前的本地筛选：查重 → 黑名单 → 关键词 → 期望薪资。
 
-        不合适（或看过）的岗位入库并打日志后返回 None；通过原样返回岗位，
-        并顺手把公司交给后台预查（查企业不阻塞投递）。
+        不合适（或看过）的岗位入库并打日志后返回 None；通过的原样返回岗位。
+        公司背景由入库时的 ``record`` 交给后台预查。
         """
         name = f"{job.title} · {job.company}"
         if seen := JobRow.find_duplicate(job):
@@ -226,10 +238,6 @@ class DeliveryEngine:
                 self.record(job, suitable=False, reason=reason)
                 await self.log(f"{name}（{reason}）", "skip")
                 return None
-        if self._prefetcher is not None:
-            self._prefetcher.schedule(
-                platform=self.platform, brand_id=job.brand_id, name=job.company, link=job.link
-            )
         return job
 
     def start_review(self, job: "Job") -> "asyncio.Task[Verdict | None]":

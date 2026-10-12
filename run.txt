@@ -38,6 +38,14 @@
        uv run python -m job
 
 
+后台启动（可选，不占命令行窗口）
+   在 PowerShell 里执行这一条，启动后不会留下任何窗口：
+       $env:PYTHONUTF8="1"; Start-Process .\.venv\Scripts\pythonw.exe -ArgumentList "main.py" -WorkingDirectory $PWD -WindowStyle Hidden
+   - 用的是 pythonw（不带控制台），日志自动写到 user_data/logs/backend.log
+   - 停止：任务管理器里结束 pythonw.exe，或执行
+       Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like "*main.py*" } | ForEach-Object { Stop-Process -Id $_.ProcessId }
+
+
 访问与停止
   - 浏览器访问：http://127.0.0.1:8000   （前后端同源，只有这一个端口）
   - 就绪自检：curl http://127.0.0.1:8000/ping   返回 {"ok":true} 即正常

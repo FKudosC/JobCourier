@@ -130,6 +130,55 @@ class ApplicationRow(SQLModel, table=True):
         return None if row is None else row.to_dict()
 
     @classmethod
+    def create_standalone(cls, url: str) -> ApplicationRow:
+        """独立网申任务：不依赖岗位库，uid 自造，公司 / 岗位名等页面检测后回填。"""
+        from uuid import uuid4
+
+        from job.models import db_session
+
+        with db_session() as session:
+            row = cls(uid=f"apply:{uuid4().hex}", job_uid="", platform="web")
+            row.url = url
+            row.domain = domain_of(url)
+            row.updated_at = _now()
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
+
+    @classmethod
+    def set_meta(
+        cls,
+        uid: str,
+        *,
+        title: str = "",
+        company: str = "",
+        salary: str = "",
+        location: str = "",
+    ) -> dict[str, Any] | None:
+        """回填页面检测到的公司 / 岗位信息；已有值不覆盖（用户手改的优先）。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            row = session.get(cls, uid)
+            if row is None:
+                return None
+            for field, value in (
+                ("title", title),
+                ("company", company),
+                ("salary", salary),
+                ("location", location),
+            ):
+                text = (value or "").strip()
+                if text and not getattr(row, field):
+                    setattr(row, field, text)
+            row.updated_at = _now()
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row.to_dict()
+
+    @classmethod
     def list_dicts(cls, *, status: str = "") -> list[dict[str, Any]]:
         """网申任务列表，新加的在前；``status`` 非空时只看该状态。"""
         from job.models import db_session

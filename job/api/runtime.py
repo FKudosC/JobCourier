@@ -91,8 +91,8 @@ class Runtime:
         self.bus = EventBus()
         self.session = BossSession()
         self.scraper = JobScraper(self.session)
-        self.responder = ChatResponder(self.session)
         self.prefetcher = CompanyPrefetcher(self._make_company_checker)
+        self.responder = ChatResponder(self.session, self.prefetcher)
         self.apply_assistant = ApplyAssistant(self.session)
         self.scraper.company_prefetcher = self.prefetcher
         self.scraper.auto_resume_hook = self._auto_resume_for
@@ -412,9 +412,9 @@ class Runtime:
             )
         else:
             self.push_log(
-                "已开启后台静默模式：浏览器启动时窗口移出屏幕"
+                "已开启后台静默模式：浏览器窗口移出屏幕"
                 if value
-                else "已关闭后台静默模式：浏览器将以正常窗口打开",
+                else "已关闭后台静默模式：想看浏览器时用「查看浏览器」调出",
             )
         self.publish_status()
 
@@ -536,16 +536,17 @@ class Runtime:
         )
         return report
 
-    def company_scan(self, uids: list[str], *, only_missing: bool = False) -> dict:
-        """批量查企业：岗位去重成公司，后台逐家查询；返回初始进度快照。
+    def company_scan(self, uids: list[str]) -> dict:
+        """批量查企业：把所选岗位去重成公司，后台逐家查询；返回初始进度快照。
 
-        ``uids`` 为空表示全部岗位（补全历史数据）。``only_missing`` 为真时只查
-        从没查过的公司（界面自动补全用），否则把 7 天内查过的也一并跳过。
-        新岗位在投递预筛时已由 ``CompanyPrefetcher`` 自动查过。
+        只查传进来的岗位，不再扫全库补历史数据：新岗位在入库时已由
+        ``CompanyPrefetcher`` 自动查过。7 天内查过的公司跳过。
         """
         if self.company_state["running"]:
             raise ApiError("企业查询正在进行，请等它跑完")
-        targets = self._company_targets(uids, only_missing=only_missing)
+        if not uids:
+            raise ApiError("请先选择要查询的岗位")
+        targets = self._company_targets(uids)
         if not targets:
             raise ApiError("这些岗位的公司都查过了，无需重复查询")
         self.company_state = {"running": True, "done": 0, "total": len(targets), "name": ""}
@@ -555,34 +556,21 @@ class Runtime:
         return dict(self.company_state)
 
     @classmethod
-    def _company_targets(
-        cls, uids: list[str], *, only_missing: bool = False
-    ) -> list[dict[str, str]]:
-        """岗位 → 去重后的公司清单；已查过（或 7 天内查过）的跳过。"""
+    def _company_targets(cls, uids: list[str]) -> list[dict[str, str]]:
+        """岗位 → 去重后的公司清单；7 天内查过的公司跳过。"""
         sources: list[dict[str, str]] = []
-        if uids:
-            for uid in uids:
-                job = JobRow.get_dict(uid)
-                if job is None:
-                    continue
-                sources.append(
-                    {
-                        "platform": str(job.get("platform") or "boss"),
-                        "brand_id": str(job.get("brandId") or ""),
-                        "name": str(job.get("company") or "").strip(),
-                        "link": str(job.get("link") or ""),
-                    }
-                )
-        else:
-            for row in JobRow.company_source():
-                sources.append(
-                    {
-                        "platform": row["platform"],
-                        "brand_id": row["brand_id"],
-                        "name": row["company"].strip(),
-                        "link": row["link"],
-                    }
-                )
+        for uid in uids:
+            job = JobRow.get_dict(uid)
+            if job is None:
+                continue
+            sources.append(
+                {
+                    "platform": str(job.get("platform") or "boss"),
+                    "brand_id": str(job.get("brandId") or ""),
+                    "name": str(job.get("company") or "").strip(),
+                    "link": str(job.get("link") or ""),
+                }
+            )
         seen: dict[str, dict[str, str]] = {}
         for source in sources:
             name, brand_id = source["name"], source["brand_id"]
@@ -590,8 +578,7 @@ class Runtime:
             if not key or key in seen:
                 continue
             seen[key] = source
-        days = None if only_missing else CompanyPrefetcher.FRESH_DAYS
-        fresh = CompanyRow.fresh(seen, days=days)
+        fresh = CompanyRow.fresh(seen, days=CompanyPrefetcher.FRESH_DAYS)
         return [t for key, t in seen.items() if key not in fresh]
 
     async def _company_scan_task(self, targets: list[dict[str, str]]) -> None:

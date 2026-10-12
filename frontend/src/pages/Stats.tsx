@@ -123,6 +123,7 @@ export default function Stats() {
               label="投递率"
               value={data?.applied_rate ?? "—"}
               hint="看过岗位 → 已投递"
+              align="center"
             />
           </Card>
           <Card className="g-in" style={{ animationDelay: "50ms" }}>
@@ -130,6 +131,7 @@ export default function Stats() {
               label="面试率"
               value={data?.interview_rate ?? "—"}
               hint="已投递 → 有面试"
+              align="center"
             />
           </Card>
           <Card className="g-in" style={{ animationDelay: "100ms" }}>
@@ -137,6 +139,7 @@ export default function Stats() {
               label="HR 响应中位"
               value={data?.response.median_label ?? "—"}
               hint="首次回复等待时长"
+              align="center"
             />
           </Card>
         </div>

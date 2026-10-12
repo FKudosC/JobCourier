@@ -295,6 +295,7 @@ class ChatResponder:
     """
 
     CHAT_URL = f"{BASE_URL}/web/geek/chat"
+    PLATFORM: ClassVar[str] = "boss"
     # 打开会话时的 HR 与岗位接口
     BOSS_API = "getBossData"
     # 每次查询最近更新的会话数
@@ -373,9 +374,11 @@ class ChatResponder:
     }
     """
 
-    def __init__(self, session: BossSession) -> None:
+    def __init__(self, session: BossSession, company_prefetcher=None) -> None:
         self.session = session
         self._stop = asyncio.Event()
+        # 公司背景预查器（由工作台注入）；None 表示不启用
+        self._prefetcher = company_prefetcher
         # 已处理过的 HR 最后一条消息，失败也不再重复处理
         self._handled: set[str] = set()
         self._replier: ChatReplier | None = None
@@ -391,6 +394,13 @@ class ChatResponder:
         # 黑名单缓存：公司 ID / 公司名 → 原因；每次 run 开始时整表载入
         self._blacklist_ids: dict[str, str] = {}
         self._blacklist_names: dict[str, str] = {}
+
+    def _prefetch_company(self, job: Job) -> None:
+        """HR 主动沟通的新岗位入列时把公司交给后台预查；没接预查器时什么都不做。"""
+        if self._prefetcher is not None:
+            self._prefetcher.schedule(
+                platform=self.PLATFORM, brand_id=job.brand_id, name=job.company, link=job.link
+            )
 
     def _load_blacklist(self) -> None:
         """整表载入黑名单，按公司 ID 与公司名两个索引缓存。"""
@@ -809,6 +819,7 @@ class ChatResponder:
             return "", job
 
         job = job.model_copy(update={"description": await self._description(page, job)})
+        self._prefetch_company(job)
         name = f"{job.title} · {job.company}"
         if reason := self._blacklist_reason(job.brand_id, job.company):
             JobRow.record(job, suitable=False, reason=reason)

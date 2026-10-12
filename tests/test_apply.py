@@ -15,7 +15,14 @@ from job.apply.assistant import ApplyAssistant, ApplyError
 from job.apply.filler import FormFiller
 from job.apply.matcher import FieldMatcher
 from job.apply.profile import ApplyProfile, resume_facts
-from job.apply.scanner import FormField, FormScanner, normalize
+from job.apply.scanner import (
+    FormField,
+    FormScanner,
+    guess_company,
+    guess_title,
+    normalize,
+    read_page_meta,
+)
 from job.boss.jobs import Job
 from job.models import db_session, init_db, reset_engine
 from job.models.application import ApplicationRow, ApplyMappingRow, domain_of
@@ -113,14 +120,20 @@ class _FakeFrame:
         raw: list[dict[str, Any]] | None = None,
         text: str = "",
         selectors: Any = (),
+        meta: dict[str, str] | None = None,
     ) -> None:
         self.raw = raw or []
         self.text = text
         self.selectors = set(selectors)
+        self.meta = meta or {}
         self.calls: list[tuple[str, str, str]] = []
 
     async def evaluate(self, source: str) -> Any:
-        return self.raw if "data-gj-idx" in source else self.text
+        if "data-gj-idx" in source:
+            return self.raw
+        if "og:site_name" in source:
+            return self.meta
+        return self.text
 
     def locator(self, selector: str) -> _FakeLocator:
         return _FakeLocator(self, selector)
@@ -135,8 +148,9 @@ class _FakePage:
         text: str = "",
         selectors: Any = (),
         frame_count: int = 1,
+        meta: dict[str, str] | None = None,
     ) -> None:
-        self.frame = _FakeFrame(raw, text, selectors)
+        self.frame = _FakeFrame(raw, text, selectors, meta)
         self.main_frame = self.frame
         self._frames = [self.frame] * frame_count
         self.goto_calls: list[str] = []
@@ -304,6 +318,30 @@ def test_scanner_gate_detects_captcha():
     assert asyncio.run(FormScanner(None).gate(_FakePage(text="请填写您的姓名"))) == ""
 
 
+def test_read_page_meta_tolerates_bad_payload():
+    assert read_page_meta(None) == {"title": "", "site": "", "h1": "", "host": ""}
+    assert read_page_meta("oops") == {"title": "", "site": "", "h1": "", "host": ""}
+    assert read_page_meta({"title": " x ", "host": "a.cn"})["title"] == "x"
+
+
+def test_guess_company_prefers_site_then_title_tail():
+    assert guess_company({"site": "云图科技"}) == "云图科技"
+    assert guess_company({"title": "后端开发实习生 - 云图科技"}) == "云图科技"
+    assert guess_company({"site": "人才招聘", "title": "招聘"}) == ""
+
+
+def test_guess_title_prefers_h1_then_title_head():
+    assert guess_title({"h1": "后端开发实习生"}) == "后端开发实习生"
+    assert guess_title({"title": "后端开发实习生 | 云图科技"}) == "后端开发实习生"
+    assert guess_title({"title": "加入我们"}) == ""
+
+
+def test_scanner_meta_reads_first_frame_with_content():
+    page = _FakePage(meta={"title": "校园招聘 - 云图科技", "host": "jobs.yuntu.cn"})
+    meta = asyncio.run(FormScanner(None).meta(page))
+    assert meta["title"] == "校园招聘 - 云图科技" and meta["host"] == "jobs.yuntu.cn"
+
+
 # --- 匹配：历史 > 规则 > AI 兜底 ----------------------------------------------
 
 
@@ -419,6 +457,23 @@ def test_application_set_url_updates_domain(tmp_db):
     saved = ApplicationRow.set_url(uid, "https://b.com/apply")
     assert saved["url"] == "https://b.com/apply" and saved["domain"] == "b.com"
     assert ApplicationRow.set_url("nope", "https://b.com") is None
+
+
+def test_application_create_standalone_needs_no_job(tmp_db):
+    row = ApplicationRow.create_standalone("https://www.yuntu.cn/apply/1")
+    assert row.uid.startswith("apply:") and row.job_uid == ""
+    assert row.platform == "web" and row.domain == "yuntu.cn"
+    assert row.status == "pending"
+
+
+def test_application_set_meta_keeps_user_edits(tmp_db):
+    row = ApplicationRow.create_standalone("https://yuntu.cn/apply/1")
+    saved = ApplicationRow.set_meta(row.uid, title="后端实习生", company="云图科技")
+    assert saved["title"] == "后端实习生" and saved["company"] == "云图科技"
+    # 第二次检测到别的名字不能盖掉已有值，空白值也不能把已有值抹掉
+    again = ApplicationRow.set_meta(row.uid, title="另一个岗位", company="")
+    assert again["title"] == "后端实习生" and again["company"] == "云图科技"
+    assert ApplicationRow.set_meta("nope", title="x") is None
 
 
 def test_application_save_fields_and_status(tmp_db):
@@ -555,10 +610,31 @@ def test_open_task_without_url_is_rejected(tmp_db):
     assert ApplicationRow.get_dict(uid) is None  # 没地址就不建任务
 
 
-def test_open_task_rejects_unknown_job(tmp_db):
+def test_open_task_rejects_unknown_task(tmp_db):
     assistant = ApplyAssistant(_FakeSession(_FakePage()))
-    with pytest.raises(ApplyError, match="岗位不存在"):
+    with pytest.raises(ApplyError, match="网申任务不存在"):
         asyncio.run(assistant.open_task("nope", "https://a.com/apply"))
+
+
+def test_open_task_creates_standalone_from_url_only(tmp_db):
+    """不挑岗位、只给官网地址，也能建出一条独立的网申任务。"""
+    page = _FakePage(
+        text="",
+        meta={"title": "后端开发实习生 - 云图科技", "site": "云图科技", "h1": "后端开发实习生", "host": "jobs.yuntu.cn"},
+    )
+    assistant = ApplyAssistant(_FakeSession(page))
+    result = asyncio.run(assistant.open_task("", "https://jobs.yuntu.cn/apply/1"))
+    task = result["task"]
+    assert task["uid"].startswith("apply:")
+    assert task["jobUid"] == "" and task["platform"] == "web"
+    assert task["domain"] == "jobs.yuntu.cn"
+    assert task["company"] == "云图科技" and task["title"] == "后端开发实习生"
+
+
+def test_open_task_requires_url_when_no_uid(tmp_db):
+    assistant = ApplyAssistant(_FakeSession(_FakePage()))
+    with pytest.raises(ApplyError, match="网申地址"):
+        asyncio.run(assistant.open_task("", "   "))
 
 
 def test_open_task_alerts_on_captcha(tmp_db):

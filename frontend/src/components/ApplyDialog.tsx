@@ -121,12 +121,15 @@ export function ApplyDialog({
   open,
   onOpenChange,
   uid,
+  initialUrl = "",
   onChanged,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  /** 岗位 uid：一个岗位一条网申任务。 */
+  /** 已有任务的 uid；为空表示新建一条（用 ``initialUrl`` 开页）。 */
   uid: string;
+  /** 新建任务时要打开的企业官网地址。 */
+  initialUrl?: string;
   /** 任务状态有变化时通知外面刷新列表。 */
   onChanged?: () => void;
 }) {
@@ -141,13 +144,12 @@ export function ApplyDialog({
   const [edits, setEdits] = useState<Record<number, FieldEdit>>({});
 
   const load = useCallback(
-    async (target: string) => {
-      if (!uid) return;
+    async (target: string, forUid: string) => {
       setLoading(true);
       setError("");
       try {
         const res = await api.post<{ task: ApplyTask; gate: string }>("/api/apply/task", {
-          job_uid: uid,
+          job_uid: forUid,
           url: target,
         });
         setTask(res.task);
@@ -163,21 +165,21 @@ export function ApplyDialog({
         setLoading(false);
       }
     },
-    [uid],
+    [],
   );
 
   useEffect(() => {
-    if (!open || !uid) return;
+    if (!open || (!uid && !initialUrl)) return;
     setTask(null);
     setGate("");
     setEdits({});
     setUrlDraft("");
-    void load("");
+    void load(initialUrl, uid);
     api
       .get<ApplyProfileBundle>("/api/config/apply-profile")
       .then(setProfile)
       .catch(() => setProfile(null));
-  }, [open, uid, load]);
+  }, [open, uid, initialUrl, load]);
 
   const labels = profile?.labels ?? {};
   const labelOptions = useMemo(() => ["不填", ...Object.values(labels)], [labels]);
@@ -185,6 +187,9 @@ export function ApplyDialog({
     () => Object.fromEntries(Object.entries(labels).map(([key, label]) => [label, key])),
     [labels],
   );
+
+  /** 任务建好之后以任务自己的 uid 为准（新建时 uid 是从后端回来的）。 */
+  const activeUid = task?.uid || uid;
 
   function patchField(index: number, patch: FieldEdit) {
     setEdits((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
@@ -211,7 +216,7 @@ export function ApplyDialog({
   async function scan() {
     await call("重扫", "scan", async () => {
       const res = await api.post<{ task: ApplyTask; gate: string }>(
-        `/api/apply/task/${encodeURIComponent(uid)}/scan`,
+        `/api/apply/task/${encodeURIComponent(activeUid)}/scan`,
       );
       setTask(res.task);
       setGate(res.gate || "");
@@ -227,7 +232,7 @@ export function ApplyDialog({
         ...patch,
       }));
       const res = await api.post<{ task: ApplyTask; outcome: FillOutcome }>(
-        `/api/apply/task/${encodeURIComponent(uid)}/fill`,
+        `/api/apply/task/${encodeURIComponent(activeUid)}/fill`,
         { fields: rows },
       );
       setTask(res.task);
@@ -246,7 +251,7 @@ export function ApplyDialog({
 
   async function submit() {
     await call("标记提交", "submit", async () => {
-      await api.post(`/api/apply/task/${encodeURIComponent(uid)}/submit`);
+      await api.post(`/api/apply/task/${encodeURIComponent(activeUid)}/submit`);
       toast.success("已记为已提交，这个岗位的标签页也关掉了");
       onChanged?.();
       onOpenChange(false);
@@ -255,7 +260,7 @@ export function ApplyDialog({
 
   async function remove() {
     await call("删除", "delete", async () => {
-      await api.del(`/api/apply/task/${encodeURIComponent(uid)}`);
+      await api.del(`/api/apply/task/${encodeURIComponent(activeUid)}`);
       toast.success("已删除网申任务");
       onChanged?.();
       onOpenChange(false);
@@ -337,7 +342,7 @@ export function ApplyDialog({
             placeholder="https://公司官网/招聘/投递表单"
           />
           <div className="flex items-center gap-2.5">
-            <PrimaryButton loading={loading} onClick={() => load(urlDraft.trim())}>
+            <PrimaryButton loading={loading} onClick={() => load(urlDraft.trim(), uid)}>
               打开并扫描表单
             </PrimaryButton>
             <span className="t-micro" style={{ color: "var(--faint)" }}>

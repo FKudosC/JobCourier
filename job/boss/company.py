@@ -209,7 +209,9 @@ class CompanySearch:
             try:
                 results = source(query)
             except Exception as exc:  # noqa: BLE001 单源失败换下一个源
-                errors.append(f"{name} {exception_text(exc)}")
+                # 详情只进日志：异常类名一长串甩到界面上全是噪声
+                log(f"搜索源「{name}」不可用: {exception_text(exc)}", "company")
+                errors.append(f"{name}不可用")
                 continue
             if results:
                 return results

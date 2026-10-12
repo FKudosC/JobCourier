@@ -16,7 +16,7 @@ from patchright.async_api import Error as PlaywrightError
 from job.apply.filler import FillOutcome, FormFiller
 from job.apply.matcher import FieldMatcher
 from job.apply.profile import ApplyProfile
-from job.apply.scanner import FormField, FormScanner
+from job.apply.scanner import FormField, FormScanner, guess_company, guess_title
 from job.models.application import ApplicationRow
 from job.models.job import JobRow
 from job.utils import log
@@ -47,15 +47,29 @@ class ApplyAssistant:
     # --- 对外流程 ---
 
     async def open_task(self, uid: str, url: str = "") -> dict[str, Any]:
-        """建/取任务并打开官网，扫一遍表单；返回任务（含字段对照表）。"""
-        if JobRow.get_dict(uid) is None:
-            raise ApplyError("岗位不存在或已删除")
-        existing = ApplicationRow.get_dict(uid) or {}
-        # 没传新地址就沿用上次填的；两个都没有说明还没告诉程序去哪儿网申
-        target = (url or "").strip() or str(existing.get("url") or "").strip()
-        if not target:
-            raise ApplyError("请先填写这个岗位的网申地址（企业官网的投递表单页）")
-        ApplicationRow.create(uid, target)
+        """建/取任务并打开官网，扫一遍表单；返回任务（含字段对照表）。
+
+        不传 ``uid`` 就是新建一条独立网申任务：用户只给一个企业官网地址，
+        公司 / 岗位名从页面上自己认；传 ``uid`` 则是接着已有的那条任务继续。
+        """
+        uid = (uid or "").strip()
+        target = (url or "").strip()
+        if not uid:
+            if not target:
+                raise ApplyError("请先填写企业官网的网申地址（投递表单页）")
+            uid = ApplicationRow.create_standalone(target).uid
+        else:
+            existing = ApplicationRow.get_dict(uid)
+            if existing is None and JobRow.get_dict(uid) is None:
+                raise ApplyError("网申任务不存在，请先新建一条网申任务")
+            # 没传新地址就沿用上次填的；两个都没有说明还没告诉程序去哪儿网申
+            target = target or str((existing or {}).get("url") or "").strip()
+            if not target:
+                raise ApplyError("请先填写这个岗位的网申地址（企业官网的投递表单页）")
+            if JobRow.get_dict(uid) is not None:
+                ApplicationRow.create(uid, target)
+            else:
+                ApplicationRow.set_url(uid, target)
         page = await self._page(uid)
         await page.goto(target, wait_until="domcontentloaded", timeout=self.TIMEOUT)
         return await self._scan(page, uid)
@@ -119,13 +133,18 @@ class ApplyAssistant:
             await self._alert(gate)
         fields = await self.scanner.scan(page)
         await self._matcher(task).match(fields)
-        saved = ApplicationRow.save_fields(uid, [f.to_dict() for f in fields], note=gate)
-        return {"task": saved or {}, "gate": gate}
+        ApplicationRow.save_fields(uid, [f.to_dict() for f in fields], note=gate)
+        return {"task": await self._detect(page, uid) or {}, "gate": gate}
+
+    async def _detect(self, page: "Page", uid: str) -> dict[str, Any] | None:
+        """从页面认出这是哪家公司、哪个岗位，回填到任务上。"""
+        meta = await self.scanner.meta(page)
+        return ApplicationRow.set_meta(uid, title=guess_title(meta), company=guess_company(meta))
 
     def _task(self, uid: str) -> dict[str, Any]:
         task = ApplicationRow.get_dict(uid)
         if task is None:
-            raise ApplyError("网申任务不存在，请先在岗位页点「网申」")
+            raise ApplyError("网申任务不存在，请先新建一条网申任务")
         return task
 
     def _matcher(self, task: dict[str, Any]) -> FieldMatcher:

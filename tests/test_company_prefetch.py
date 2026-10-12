@@ -170,8 +170,8 @@ def test_company_targets_dedupes_and_skips_fresh(tmp_db):
     assert [t["name"] for t in targets] == ["乙公司", "丙公司"]
 
 
-def test_company_targets_all_jobs_only_missing(tmp_db):
-    """``uids`` 为空扫全部岗位；``only_missing`` 只补从没查过的公司。"""
+def test_company_targets_empty_uids_returns_nothing(tmp_db):
+    """不再扫全库补历史数据：没传岗位就没有要查的公司。"""
     from job.api.runtime import Runtime
     from job.boss.jobs import Job
     from job.models.job import JobRow
@@ -186,5 +186,40 @@ def test_company_targets_all_jobs_only_missing(tmp_db):
         "b1", name="甲公司", full_name="", info={}, hits=[], risk="low", summary="", points=[]
     )
 
-    targets = Runtime._company_targets([], only_missing=True)
-    assert [t["brand_id"] for t in targets] == ["b2"]
+    assert Runtime._company_targets([]) == []
+
+
+def test_company_scan_requires_uids(tmp_db):
+    """批量查企业必须带岗位：空的 uids 直接报错，不再回退到全库。"""
+    from job.api.runtime import ApiError, Runtime
+
+    runtime = Runtime()
+    with pytest.raises(ApiError):
+        runtime.company_scan([])
+
+
+def test_record_prefetches_company(tmp_db):
+    """岗位入库（进入岗位管理）时就把公司交给后台预查。"""
+    from job.boss.jobs import Job
+    from job.platforms.engine import DeliveryEngine
+
+    class FakePrefetcher:
+        def __init__(self) -> None:
+            self.scheduled: list[tuple[str, str, str]] = []
+
+        def schedule(self, *, platform, brand_id, name, link=""):
+            self.scheduled.append((platform, brand_id, name))
+            return True
+
+    prefetcher = FakePrefetcher()
+    engine = DeliveryEngine(
+        platform="boss", daily_limit=10, stop=asyncio.Event(), company_prefetcher=prefetcher
+    )
+    engine.record(
+        Job.model_validate(
+            {"job_id": "p1", "title": "岗位", "company": "入库公司", "brand_id": "pb1"}
+        ),
+        suitable=True,
+    )
+
+    assert prefetcher.scheduled == [("boss", "pb1", "入库公司")]

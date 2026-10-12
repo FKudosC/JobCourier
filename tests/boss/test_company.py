@@ -149,7 +149,7 @@ def test_web_all_sources_fail_reports_reason(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(search, "_so", boom)
     monkeypatch.setattr(search, "_ddgs", boom)
-    with pytest.raises(RuntimeError, match="360 搜索.*ddgs"):
+    with pytest.raises(RuntimeError, match="360 搜索不可用.*ddgs不可用"):
         search._web("某公司")
 
 

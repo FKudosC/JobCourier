@@ -108,12 +108,85 @@ _GATE_IFRAMES = (
     "iframe[id*='captcha']",
 )
 
+# 页面信息脚本：读标题 / 站点名 / 一级标题，用来判断这是哪家公司、哪个岗位
+_META_JS = """
+() => {
+  const content = (sel) => {
+    const el = document.querySelector(sel);
+    return el ? (el.getAttribute('content') || '').trim() : '';
+  };
+  const h1 = document.querySelector('h1');
+  return {
+    title: (document.title || '').trim(),
+    site: content('meta[property="og:site_name"]') || content('meta[name="application-name"]'),
+    h1: h1 ? (h1.innerText || h1.textContent || '').trim().slice(0, 80) : '',
+    host: location.hostname || '',
+  };
+}
+"""
+
+# 标题里的分隔符：官网标题常见「岗位 - 公司」「公司 | 招聘」
+_TITLE_SEPS = re.compile(r"\s*[|｜\-–—_·:：]\s*")
+# 这些片段不是公司名，别拿来当公司
+_GENERIC_NAMES = frozenset(
+    {
+        "首页",
+        "登录",
+        "招聘",
+        "人才招聘",
+        "校园招聘",
+        "社会招聘",
+        "加入我们",
+        "联系我们",
+        "岗位详情",
+        "职位详情",
+    }
+)
+
 _PUNCT = re.compile(r"[\s*＊·・:：,，.。/／\\|｜()（）\[\]【】<>《》\"'`~!！?？;；\-—_+]+")
 
 
 def normalize(text: str) -> str:
     """归一化字段文字：去标点空白、统一小写，便于比对。"""
     return _PUNCT.sub("", (text or "").strip().lower())
+
+
+def read_page_meta(raw: Any) -> dict[str, str]:
+    """把页面信息脚本的返回值规整成 ``title`` / ``site`` / ``h1`` / ``host``。"""
+    data = raw if isinstance(raw, dict) else {}
+    return {
+        "title": str(data.get("title") or "").strip(),
+        "site": str(data.get("site") or "").strip(),
+        "h1": str(data.get("h1") or "").strip(),
+        "host": str(data.get("host") or "").strip(),
+    }
+
+
+def _title_parts(title: str) -> list[str]:
+    """把页面标题按分隔符拆成几段，去掉空段。"""
+    return [part.strip() for part in _TITLE_SEPS.split(title or "") if part.strip()]
+
+
+def guess_company(meta: dict[str, str]) -> str:
+    """猜公司名：站点名优先，其次标题最后一段（官网标题常是「岗位 - 公司」）。"""
+    site = str(meta.get("site") or "").strip()
+    if site and site not in _GENERIC_NAMES:
+        return site[:60]
+    parts = _title_parts(str(meta.get("title") or ""))
+    if len(parts) > 1 and parts[-1] not in _GENERIC_NAMES:
+        return parts[-1][:60]
+    return ""
+
+
+def guess_title(meta: dict[str, str]) -> str:
+    """猜岗位名：一级标题优先，其次标题第一段。"""
+    h1 = str(meta.get("h1") or "").strip()
+    if h1:
+        return h1[:60]
+    parts = _title_parts(str(meta.get("title") or ""))
+    if parts and parts[0] not in _GENERIC_NAMES:
+        return parts[0][:60]
+    return ""
 
 
 @dataclass
@@ -289,3 +362,15 @@ class FormScanner:
                 except PlaywrightError:
                     continue
         return ""
+
+    async def meta(self, page: "Page") -> dict[str, str]:
+        """读页面标题 / 站点名 / 一级标题，用来判断这是哪家公司、哪个岗位。"""
+        for frame in page.frames:
+            try:
+                raw = await frame.evaluate(_META_JS)
+            except PlaywrightError:
+                continue
+            data = read_page_meta(raw)
+            if data["title"] or data["site"] or data["h1"]:
+                return data
+        return read_page_meta(None)

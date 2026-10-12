@@ -144,27 +144,20 @@ class BossSession:
     async def _launch(self) -> BrowserContext:
         """启动 Playwright 并打开持久化 Chrome。
 
-        「后台静默模式」开启时把窗口移出屏幕：任务照常运行但不弹出打扰；
-        想看时在工作台切掉开关，窗口立即移回屏幕（无需重启浏览器）。
+        窗口一律先移出屏幕：跑任务时不该自己弹出来打断用户。想看一眼时用
+        「查看浏览器」，走 CDP 把窗口调回屏幕（无需重启浏览器）。
         """
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
         exe = self.chrome_executable()
         browser: dict[str, Any] = {"executable_path": str(exe)} if exe else {"channel": "chrome"}
-        args: list[str] = []
-        try:
-            from job.models.setting import BrowserSettings
-
-            if BrowserSettings.load().background:
-                args = ["--window-position=-32000,-32000", "--window-size=1280,800"]
-        except Exception:  # noqa: BLE001 设置读不到就按可见模式启动
-            pass
+        args = ["--window-position=-32000,-32000", "--window-size=1280,800"]
         try:
             self._playwright = await async_playwright().start()
             return await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=str(self.user_data_dir),
                 headless=False,
                 no_viewport=True,
-                args=args or None,
+                args=args,
                 **browser,
             )
         except PlaywrightError as exc:
