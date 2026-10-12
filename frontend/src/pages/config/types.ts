@@ -53,6 +53,15 @@ export interface ReplyCfg {
   pace: Pace;
 }
 
+/** 网申资料：企业官网投递表单要填的结构化字段（键为字段名，值只存本机）。 */
+export interface ApplyProfile {
+  labels: Record<string, string>;
+  values: Record<string, string>;
+  /** 用户自己补的字段，键是字段名称、值是内容。 */
+  extra: Record<string, string>;
+  ready: boolean;
+}
+
 export interface Bundle {
   query: string;
   keywords: string[];
@@ -77,6 +86,7 @@ export interface Bundle {
   llm: Llm;
   blacklist: BlackRow[];
   options: Options;
+  apply_profile: ApplyProfile;
 }
 
 export type ListField = "keywords" | "cities" | "experience" | "education" | "funding" | "scale";

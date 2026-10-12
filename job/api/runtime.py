@@ -16,6 +16,7 @@ from patchright.async_api import Error as PlaywrightError
 from pydantic_ai.exceptions import AgentRunError
 from sqlalchemy.exc import SQLAlchemyError
 
+from job.apply.assistant import ApplyAssistant
 from job.boss.chat import ChatReplier, ChatResponder
 from job.boss.company import (
     CompanyChecker,
@@ -92,6 +93,7 @@ class Runtime:
         self.scraper = JobScraper(self.session)
         self.responder = ChatResponder(self.session)
         self.prefetcher = CompanyPrefetcher(self._make_company_checker)
+        self.apply_assistant = ApplyAssistant(self.session)
         self.scraper.company_prefetcher = self.prefetcher
         self.scraper.auto_resume_hook = self._auto_resume_for
         # 界面快照（与原工作台字段一一对应）

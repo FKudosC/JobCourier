@@ -3,6 +3,7 @@
 import {
   Ban,
   Check,
+  ClipboardList,
   FileText,
   FileUp,
   ListFilter,
@@ -31,9 +32,11 @@ import {
   SoftButton,
   SwitchRow,
   TextArea,
+  TextInput,
 } from "../ui";
 
 import type {
+  ApplyProfile,
   BlackRow,
   Bundle,
   ListField,
@@ -396,6 +399,20 @@ export default function Config() {
     }
   }
 
+  /* ---- 网申资料 ---- */
+
+  /** 只提交动过的键：后端按 patch 合并，补充字段传空值即删除。 */
+  async function saveApplyProfile(values: Record<string, string>) {
+    try {
+      const res = await api.put<ApplyProfile>("/api/config/apply-profile", { values });
+      setBundle((b) => (b ? { ...b, apply_profile: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+      void reload();
+    }
+  }
+
   /* ---- 浏览器 ---- */
 
   async function toggleBackground(value: boolean) {
@@ -412,6 +429,7 @@ export default function Config() {
   /* ---- 渲染 ---- */
 
   const resumeReady = !!form?.resume_text.trim();
+  const applyReady = !!bundle?.apply_profile.ready;
   const modelOptions =
     bundle && bundle.llm.model && !bundle.llm.models.includes(bundle.llm.model)
       ? [bundle.llm.model, ...bundle.llm.models]
@@ -420,6 +438,7 @@ export default function Config() {
   const tabs = [
     { id: "filters", label: "岗位筛选", icon: <ListFilter size={13} /> },
     { id: "resume", label: "简历配置", icon: <FileText size={13} /> },
+    { id: "apply", label: "网申资料", icon: <ClipboardList size={13} /> },
     { id: "reply", label: "自动回复", icon: <MessagesSquare size={13} /> },
     { id: "blacklist", label: "黑名单", icon: <Ban size={13} /> },
     { id: "system", label: "系统设置", icon: <Settings2 size={13} /> },
@@ -449,6 +468,7 @@ export default function Config() {
               ) : (
                 <GhostButton onClick={() => setTab("resume")}>去上传</GhostButton>
               )}
+              {applyReady && <Badge color="green">已填网申资料</Badge>}
               {savedAt && (
                 <span className="t-micro inline-flex items-center gap-1" style={{ color: "var(--faint)" }}>
                   <Check size={12} /> 已自动保存 {savedAt}
@@ -776,6 +796,69 @@ export default function Config() {
                           .then(() => markSaved())
                           .catch((err) => toast.error((err as Error).message));
                       }}
+                    />
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* ---------------- 网申资料 ---------------- */}
+            {tab === "apply" && (
+              <div className="g-in flex flex-col gap-5">
+                <Card pad="0.5rem 1.35rem">
+                  <div className="pt-3">
+                    <SectionTitle
+                      title="基本信息"
+                      hint="企业官网的网申表常问这些。填得越全，网申助手能替你填的字段越多；内容只存在本机，不会上传。"
+                    />
+                  </div>
+                  <div className="g-divided">
+                    <SetGrid cols="sm:grid-cols-2 lg:grid-cols-3">
+                      {Object.entries(bundle.apply_profile.labels)
+                        .filter(([key]) => key !== "self_intro")
+                        .map(([key, label]) => (
+                          <Field key={key} label={label}>
+                            <DelayInput
+                              value={bundle.apply_profile.values[key] ?? ""}
+                              onCommit={(v) => saveApplyProfile({ [key]: v })}
+                              width="100%"
+                              delay={600}
+                            />
+                          </Field>
+                        ))}
+                    </SetGrid>
+                  </div>
+                </Card>
+
+                <Card pad="0.5rem 1.35rem">
+                  <div className="pt-3">
+                    <SectionTitle
+                      title="自我介绍"
+                      hint="网申表的「个人简介 / 自我评价」栏会填这段；留空时网申助手会从简历正文里挑。"
+                    />
+                  </div>
+                  <div className="py-4">
+                    <TextArea
+                      value={bundle.apply_profile.values.self_intro ?? ""}
+                      debounce={900}
+                      minHeight={140}
+                      placeholder="一两句话介绍自己，比如专业、方向、做过什么。"
+                      onChange={(v) => saveApplyProfile({ self_intro: v })}
+                    />
+                  </div>
+                </Card>
+
+                <Card pad="0.5rem 1.35rem">
+                  <div className="pt-3">
+                    <SectionTitle
+                      title="补充字段"
+                      hint="官网表里还会问些别的，比如「作品集链接」「期望城市」「紧急联系人」。在这里按 名称 / 内容 自己补，网申助手会按名称去认。"
+                    />
+                  </div>
+                  <div className="py-4">
+                    <ExtraFields
+                      extra={bundle.apply_profile.extra}
+                      onSet={(name, value) => saveApplyProfile({ [`extra:${name}`]: value })}
                     />
                   </div>
                 </Card>
@@ -1127,4 +1210,62 @@ async function saveTailor(
   } catch (err) {
     toast.error((err as Error).message);
   }
+}
+
+/** 补充字段编辑器：已添加的逐行改名 / 改值 / 删除，下方一行用来新增。 */
+function ExtraFields({
+  extra,
+  onSet,
+}: {
+  extra: Record<string, string>;
+  /** 传空值即删除该字段（后端按 patch 合并）。 */
+  onSet: (name: string, value: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  const rows = Object.entries(extra);
+
+  function add() {
+    const key = name.trim();
+    if (!key) {
+      toast.error("请先填字段名称");
+      return;
+    }
+    onSet(key, value.trim());
+    setName("");
+    setValue("");
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {rows.length > 0 && (
+        <div className="g-divided-soft">
+          {rows.map(([key, val]) => (
+            <div key={key} className="flex flex-wrap items-center gap-3 py-3">
+              <span
+                className="t-label w-40 shrink-0 truncate font-semibold"
+                style={{ color: "var(--ink)" }}
+                title={key}
+              >
+                {key}
+              </span>
+              <div className="min-w-[220px] flex-1">
+                <DelayInput value={val} onCommit={(v) => onSet(key, v)} width="100%" />
+              </div>
+              <GhostButton danger onClick={() => onSet(key, "")}>
+                <Trash2 size={13} /> 删除
+              </GhostButton>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <TextInput value={name} onChange={setName} placeholder="字段名称，如「作品集链接」" width={200} />
+        <TextInput value={value} onChange={setValue} placeholder="要填的内容" width={260} />
+        <PrimaryButton onClick={add}>
+          <Plus size={13} /> 添加
+        </PrimaryButton>
+      </div>
+    </div>
+  );
 }

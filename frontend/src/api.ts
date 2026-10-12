@@ -3,7 +3,15 @@
 export type Dict = Record<string, any>;
 
 /** 普通请求 15s 超时；下面这些接口要跑采集 / 大模型，放宽到 120s。 */
-const LONG_RUNNING_PREFIXES = ["/api/analyze", "/api/tailor", "/api/company", "/api/llm/", "/api/reply/"];
+const LONG_RUNNING_PREFIXES = [
+  "/api/analyze",
+  "/api/tailor",
+  "/api/company",
+  "/api/llm/",
+  "/api/reply/",
+  // 网申要开浏览器、跑企业官网，慢是正常的
+  "/api/apply/task",
+];
 
 function timeoutFor(path: string): number {
   return LONG_RUNNING_PREFIXES.some((p) => path.startsWith(p)) ? 120000 : 15000;

@@ -51,6 +51,7 @@ def get_engine():
         "job.models.company",
         "job.models.blacklist",
         "job.models.pending",
+        "job.models.application",
     ):
         importlib.import_module(mod)
 

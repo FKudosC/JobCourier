@@ -9,6 +9,7 @@ import {
   Activity,
   Briefcase,
   Eye,
+  FileInput,
   LayoutDashboard,
   MessagesSquare,
   Moon,
@@ -27,6 +28,7 @@ import { GhostButton, IconButton } from "./ui";
 const NAV = [
   { to: "/", label: "工作台", icon: LayoutDashboard },
   { to: "/jobs", label: "岗位管理", icon: Briefcase },
+  { to: "/apply", label: "网申助手", icon: FileInput },
   { to: "/messages", label: "消息", icon: MessagesSquare },
   { to: "/stats", label: "数据", icon: Activity },
   { to: "/config", label: "配置中心", icon: Settings2 },

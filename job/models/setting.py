@@ -188,3 +188,65 @@ class BrowserSettings(KeyValueSettings):
     PREFIX: ClassVar[str] = "browser_"
 
     background: bool = False
+
+
+class ApplyProfileSettings(KeyValueSettings):
+    """网申资料：企业官网表单要填的个人信息，只存在本机数据库里。
+
+    官网表单问的东西远比 BOSS 多（学校、专业、到岗时间、期望薪资……），
+    单独存一份结构化资料，比每次从简历正文里现抠准确得多；简历正文只作为兜底。
+    """
+
+    PREFIX: ClassVar[str] = "apply_"
+
+    # 字段 → 界面标签（顺序即界面顺序）
+    LABELS: ClassVar[dict[str, str]] = {
+        "name": "姓名",
+        "gender": "性别",
+        "phone": "手机号",
+        "email": "邮箱",
+        "wechat": "微信号",
+        "birth": "出生年月",
+        "city": "现居城市",
+        "address": "通讯地址",
+        "school": "毕业学校",
+        "major": "专业",
+        "degree": "学历",
+        "graduate_year": "毕业年份",
+        "expected_salary": "期望薪资",
+        "available": "到岗时间",
+        "github": "GitHub / 作品集",
+        "portfolio": "个人主页",
+        "self_intro": "自我介绍",
+    }
+
+    name: str = ""
+    gender: str = ""
+    phone: str = ""
+    email: str = ""
+    wechat: str = ""
+    birth: str = ""
+    city: str = ""
+    address: str = ""
+    school: str = ""
+    major: str = ""
+    degree: str = ""
+    graduate_year: str = ""
+    expected_salary: str = ""
+    available: str = ""
+    github: str = ""
+    portfolio: str = ""
+    self_intro: str = ""
+    # 自定义补充字段：官网表单里那些上面没有的（键 = 表单上的说法）
+    extra: dict[str, str] = {}
+
+    def filled(self) -> dict[str, str]:
+        """有值的字段（含自定义补充字段），键为字段名。"""
+        data = {k: v.strip() for k, v in self.model_dump().items() if isinstance(v, str)}
+        data.update({k: v.strip() for k, v in self.extra.items() if v.strip()})
+        return {k: v for k, v in data.items() if v}
+
+    @property
+    def ready(self) -> bool:
+        """至少有姓名和联系方式，才够填一张网申表。"""
+        return bool(self.name.strip() and (self.phone.strip() or self.email.strip()))

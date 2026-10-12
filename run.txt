@@ -48,6 +48,8 @@
   - 运行期数据都在 user_data/：数据库 job-courier.db、简历 resumes/、
     Chrome 登录态 chrome-profile/、日志 logs/。
     首次运行自动生成，已被 .gitignore 排除，不会提交到仓库。
+  - 网申任务与「网申资料」（姓名、手机号、邮箱等）也写在 job-courier.db 里，
+    同样只存本机，不会上传到任何服务器。
   - 想换位置（例如同步盘）：启动前设置环境变量 JOB_COURIER_DATA_DIR 指向目标目录。
 
 

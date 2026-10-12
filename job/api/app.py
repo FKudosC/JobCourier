@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,11 +25,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openai import APIError
+from patchright.async_api import Error as PlaywrightError
 from pydantic import BaseModel, Field, ValidationError
 from pydantic_ai.exceptions import AgentRunError
 
 from job.api.net import DEV_PORT
 from job.api.runtime import ApiError, runtime
+from job.apply.assistant import ApplyError
+from job.apply.profile import ApplyProfile
 from job.boss.filters import (
     City,
     Education,
@@ -45,13 +49,19 @@ from job.boss.keywords import KeywordAgent
 from job.boss.resume_tailor import ResumeTailor, load_saved_resume, save_custom_resume
 from job.models import init_db, migration_warnings
 from job.models import stats as stats_mod
+from job.models.application import ApplicationRow
 from job.models.blacklist import CompanyBlacklistRow
 from job.models.chat import ChatMessageRow, ChatStatusRow
 from job.models.company import CompanyRow
 from job.models.job import JobRow
 from job.models.pending import ReplyPendingRow
 from job.models.search import DEFAULT_MIN_SCORE, LIST_FIELDS, SearchConfigRow
-from job.models.setting import AutoReplySettings, LlmSettings, TailorSettings
+from job.models.setting import (
+    ApplyProfileSettings,
+    AutoReplySettings,
+    LlmSettings,
+    TailorSettings,
+)
 from job.utils import log_exception
 from job.utils.llm import explain
 from job.utils.resume import ResumePdf
@@ -312,6 +322,7 @@ def config_bundle() -> dict:
                 Pace.label(reply.pace), reply.pace_profile.model_dump()
             ),
         },
+        "apply_profile": apply_profile_bundle(),
         "llm": llm_bundle(),
         "blacklist": CompanyBlacklistRow.list_dicts(),
         "options": {
@@ -1042,6 +1053,157 @@ def tailor_export(job_uid: str, content: str = "") -> Response:
     if not text:
         raise ApiError("还没有生成结果")
     return _download(text, f"resume-{_now_stamp()}.txt", "text/plain; charset=utf-8")
+
+
+# ---------------------------------------------------------------------------
+# 网申助手
+# ---------------------------------------------------------------------------
+
+
+def apply_profile_bundle() -> dict:
+    """网申资料：配置中心填的结构化字段 + 简历正文兜底。"""
+    settings = ApplyProfileSettings.load()
+    resume = str(SearchConfigRow.load().get("resume_text") or "")
+    profile = ApplyProfile.from_sources(settings, resume)
+    return {
+        "labels": ApplyProfileSettings.LABELS,
+        "values": {
+            key: str(getattr(settings, key, "") or "") for key in ApplyProfileSettings.LABELS
+        },
+        "extra": dict(settings.extra),
+        "ready": settings.ready,
+        "entries": [entry.to_dict() for entry in profile.entries],
+    }
+
+
+@app.get("/api/config/apply-profile")
+def get_apply_profile() -> dict:
+    init_db()
+    return apply_profile_bundle()
+
+
+class ApplyProfileIn(BaseModel):
+    # 键为字段名（自定义补充字段用 ``extra:名称``），只更新传上来的键
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+@app.put("/api/config/apply-profile")
+def put_apply_profile(body: ApplyProfileIn) -> dict:
+    """保存网申资料：没传的字段保持原样，空的补充字段直接删掉。"""
+    data = ApplyProfileSettings.load().model_dump()
+    for key, raw in body.values.items():
+        text = str(raw or "").strip()
+        if key in ApplyProfileSettings.LABELS:
+            data[key] = text
+        elif key.startswith("extra:"):
+            name = key.removeprefix("extra:").strip()
+            if not name:
+                continue
+            if text:
+                data["extra"][name] = text
+            else:
+                data["extra"].pop(name, None)
+    ApplyProfileSettings(**data).save()
+    return apply_profile_bundle()
+
+
+def _apply_url(raw: str) -> str:
+    """校验网申地址：只放行 http(s)，别把浏览器指到本地文件之类的地址上。"""
+    url = (raw or "").strip()
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ApiError("网申地址要以 http:// 或 https:// 开头")
+    return url
+
+
+async def _apply_call(what: str, call: Callable[[], Awaitable[dict]]) -> dict:
+    """把网申流程里的异常统一翻成可读提示（路由层转成 HTTP 400）。"""
+    try:
+        return await call()
+    except ApplyError as exc:
+        raise ApiError(str(exc)) from exc
+    except (RuntimeError, PlaywrightError) as exc:
+        raise ApiError(f"{what}失败：{exc}") from exc
+    except Exception as exc:  # noqa: BLE001 兜底给出可读提示
+        raise ApiError(f"{what}失败：{log_exception('apply', exc)}") from exc
+
+
+@app.get("/api/apply/tasks")
+def apply_tasks(status: str = "") -> list[dict]:
+    """网申任务列表，新加的在前；``status`` 非空时只看该状态。"""
+    init_db()
+    return ApplicationRow.list_dicts(status=status)
+
+
+class ApplyTaskIn(BaseModel):
+    job_uid: str
+    url: str = ""
+
+
+@app.post("/api/apply/task")
+async def apply_open(body: ApplyTaskIn) -> dict:
+    """建/取网申任务并打开企业官网，扫一遍表单返回字段对照表。"""
+    uid = (body.job_uid or "").strip()
+    if not uid:
+        raise ApiError("缺少岗位 uid")
+    url = _apply_url(body.url)
+    runtime.push_log(f"网申：正在打开 {url or '上次填过的网申地址'}…")
+    return await _apply_call("打开网申页面", lambda: runtime.apply_assistant.open_task(uid, url))
+
+
+class ApplyUrlIn(BaseModel):
+    url: str = ""
+
+
+@app.put("/api/apply/task/{uid}/url")
+def apply_set_url(uid: str, body: ApplyUrlIn) -> dict:
+    """改网申地址：岗位里没有官网链接时，由用户在网申页手填。"""
+    init_db()
+    saved = ApplicationRow.set_url(uid, _apply_url(body.url))
+    if saved is None:
+        raise HTTPException(404, "网申任务不存在")
+    return saved
+
+
+@app.post("/api/apply/task/{uid}/scan")
+async def apply_scan(uid: str) -> dict:
+    """重扫当前页面：官网表单常在填了一栏之后才展开下一栏。"""
+    return await _apply_call("扫描表单", lambda: runtime.apply_assistant.scan(uid))
+
+
+class ApplyFillIn(BaseModel):
+    # 前端改过的行：``[{"index": 3, "key": "name", "filled": "张三"}]``
+    fields: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.post("/api/apply/task/{uid}/fill")
+async def apply_fill(uid: str, body: ApplyFillIn) -> dict:
+    """把对照表填进页面；只填不提交，提交按钮永远留给用户点。"""
+    result = await _apply_call("填写表单", lambda: runtime.apply_assistant.fill(uid, body.fields))
+    outcome = result.get("outcome") or {}
+    runtime.push_log(
+        f"网申填表：已填 {outcome.get('filled', 0)} 项，"
+        f"跳过 {outcome.get('skipped', 0)} 项，"
+        f"待手动 {outcome.get('failed', 0)} 项"
+    )
+    return result
+
+
+@app.post("/api/apply/task/{uid}/submit")
+async def apply_submit(uid: str) -> dict:
+    """标记为已提交（用户在浏览器里自己点了提交之后），并关掉这个标签页。"""
+    saved = await _apply_call("标记提交", lambda: runtime.apply_assistant.submit(uid))
+    runtime.push_log(f"网申已完成：{saved.get('title') or saved.get('uid') or ''}")
+    return saved
+
+
+@app.delete("/api/apply/task/{uid}")
+async def apply_delete(uid: str) -> dict:
+    if not await runtime.apply_assistant.delete(uid):
+        raise HTTPException(404, "网申任务不存在")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
