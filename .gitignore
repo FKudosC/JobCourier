@@ -1,0 +1,34 @@
+# ---- 用户数据 ----
+# 运行期数据（Chrome 登录态、简历、数据库、日志）不入库，只保留目录说明
+/user_data/*
+!/user_data/README.md
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+# uv export 生成的锁定文件
+/requirements.txt
+
+# ---- 前端 ----
+node_modules/
+/frontend/dist/
+*.tsbuildinfo
+
+# ---- 打包产物 ----
+upload/
+upload.zip
+*.log
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

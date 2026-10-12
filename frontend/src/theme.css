@@ -1,0 +1,1237 @@
+@import "tailwindcss";
+
+/*
+ * JobCourier — 设计系统 「纸与墨」
+ *
+ * 全部视觉令牌的唯一真源。组件只允许引用 var(--token)，不允许出现字面色值。
+ * 浅色纸面 + 单一靛青主色 + 细分隔线；靠排版和留白建立层级，不靠阴影堆叠。
+ */
+
+/* ============================================================
+   字体：自托管 Geist（拉丁/数字），中文回落系统黑体
+   ============================================================ */
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-latin-ext.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/geist-mono-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/geist-mono-latin-ext.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ============================================================
+   令牌
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* —— 纸面 —— */
+  --paper: #f3f0e9;
+  --paper-2: #ebe6db;
+  --sheet: #fffefa;
+  --sheet-2: #faf7f1;
+  --sheet-3: #f1ede4;
+
+  /* —— 墨色：暖灰一个家族 —— */
+  --ink: #17130e;
+  --text: #322b22;
+  --muted: #6c6256;
+  --faint: #9a8f81;
+  --line: #e2dacc;
+  --line-2: #cfc4b1;
+
+  /* —— 主色：靛青 —— */
+  --accent: #0f6f6c;
+  --accent-hi: #0b5b59;
+  --accent-deep: #0a4d4b;
+  --accent-soft: #dfeeec;
+  --accent-tint: rgba(15, 111, 108, 0.07);
+  --accent-line: #b5d4d1;
+  --accent-ink: #ffffff;
+
+  /* —— 语义色（与主色分开，不参与品牌表达）—— */
+  --good: #1b7a49;
+  --good-soft: #e1f0e7;
+  --good-line: #b9dac6;
+  --warn: #95600e;
+  --warn-soft: #faeddb;
+  --warn-line: #ebd4ae;
+  --bad: #b03527;
+  --bad-soft: #fbe4e1;
+  --bad-line: #edc1ba;
+  --teal: #0f6f6c;
+  --teal-soft: #dfeeec;
+  --star: #a3760d;
+  --salary: #8a5a12;
+
+  /* 图表强调柱：与主色形成强对比的那一根（漏斗总量、当日峰值） */
+  --bar-strong: var(--ink);
+
+  /* —— 面/线的中性别名（组件里好读）—— */
+  --soft: #f1ede4;
+  --surface: var(--sheet);
+  --surface-2: var(--sheet-2);
+  --surface-3: var(--sheet-3);
+  --border: var(--line);
+  --border-strong: var(--line-2);
+
+  /* —— 圆角：外层松、内层紧 —— */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r-md: 11px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-full: 999px;
+
+  /* —— 阴影：一律带暖褐色调，光源统一来自上方 —— */
+  --sh-1: 0 1px 1px rgba(72, 55, 30, 0.05), 0 1px 2px rgba(72, 55, 30, 0.05);
+  --sh-2: 0 2px 4px rgba(72, 55, 30, 0.06), 0 1px 2px rgba(72, 55, 30, 0.05);
+  --sh-3: 0 14px 32px -10px rgba(58, 43, 22, 0.24), 0 4px 10px rgba(58, 43, 22, 0.06);
+  --sh-pop: -26px 0 64px -22px rgba(58, 43, 22, 0.3);
+  --sh-accent: 0 1px 2px rgba(11, 91, 89, 0.3);
+
+  /* —— 排版 —— */
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+    sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "Cascadia Mono", Consolas, "SF Mono",
+    Menlo, monospace;
+
+  --fs-display: 2.4rem;
+  --fs-h1: 1.6rem;
+  --fs-h2: 1.05rem;
+  --fs-body: 0.875rem;
+  --fs-meta: 0.8rem;
+  --fs-micro: 0.72rem;
+
+  /* —— 节奏 —— */
+  --space-gutter: clamp(1.25rem, 2.6vw, 2.75rem);
+  --top-h: 60px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* —— 层级 —— */
+  --z-nav: 30;
+  --z-pop: 40;
+  --z-dialog: 60;
+  --z-boot: 100;
+}
+
+/* ============================================================
+   夜间主题「星港」
+
+   同一套令牌的另一种取值：纸面换成深空，墨色换成冷光，主色从靛青换成
+   冰蓝。组件全部走 var()，所以这里只覆盖变量 + 少数几处无法用变量表达的
+   硬编码（混色、混合模式、遮罩）。
+   ============================================================ */
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* —— 深空 ——
+     面/下沉面的相对关系与日间一致：sheet 最亮（卡片），sheet-3 最沉（凹槽），
+     保证「越靠内越暗」的直觉在夜间同样成立。 */
+  --paper: #070a12;
+  --paper-2: #0b101c;
+  --sheet: #131b2c;
+  --sheet-2: #0f1626;
+  --sheet-3: #0a0f1a;
+
+  /* —— 冷光墨色 —— */
+  --ink: #e8f1ff;
+  --text: #c3d1e6;
+  --muted: #8b9cb6;
+  --faint: #5f6e88;
+  --line: #1d2942;
+  --line-2: #2c3c5c;
+
+  /* —— 主色：冰蓝 —— */
+  --accent: #22d3ee;
+  --accent-hi: #67e8f9;
+  --accent-deep: #7defff;
+  --accent-soft: rgba(34, 211, 238, 0.13);
+  --accent-tint: rgba(34, 211, 238, 0.08);
+  --accent-line: rgba(34, 211, 238, 0.34);
+  --accent-ink: #04121a;
+
+  /* —— 语义色：提亮到深底上仍可读 —— */
+  --good: #34d399;
+  --good-soft: rgba(52, 211, 153, 0.14);
+  --good-line: rgba(52, 211, 153, 0.32);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --warn-line: rgba(251, 191, 36, 0.32);
+  --bad: #f87070;
+  --bad-soft: rgba(248, 112, 112, 0.14);
+  --bad-line: rgba(248, 112, 112, 0.34);
+  --teal: #22d3ee;
+  --teal-soft: rgba(34, 211, 238, 0.13);
+  --star: #fbbf24;
+  --salary: #ffcb5c;
+  --bar-strong: #a5b4fc;
+
+  --soft: #161f31;
+
+  /* —— 阴影：深底上靠黑色压深，主色处改发光 —— */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --sh-2: 0 2px 6px rgba(0, 0, 0, 0.5);
+  --sh-3: 0 18px 44px -12px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(34, 211, 238, 0.07);
+  --sh-pop: -26px 0 64px -22px rgba(0, 0, 0, 0.78);
+  --sh-accent: 0 0 0 1px rgba(34, 211, 238, 0.4), 0 8px 24px -8px rgba(34, 211, 238, 0.5);
+}
+
+/* 极光：顶部两团冷辉，给纯深底一点纵深 */
+[data-theme="dark"] body {
+  background:
+    radial-gradient(1200px 620px at 12% -12%, rgba(34, 211, 238, 0.11), transparent 62%),
+    radial-gradient(900px 520px at 104% -6%, rgba(129, 140, 248, 0.1), transparent 58%),
+    var(--paper);
+}
+
+/* 颗粒在黑底上改用 screen，才不会把底下压成一团黑 */
+[data-theme="dark"] .g-grain {
+  mix-blend-mode: screen;
+  opacity: 0.4;
+}
+
+/* 品牌标记：圆底自发光，剪影用深色（纸飞机反白） */
+[data-theme="dark"] .g-brandmark {
+  background: linear-gradient(150deg, #67e8f9, #22d3ee 55%, #0ea5b7);
+  box-shadow:
+    0 0 18px -2px rgba(34, 211, 238, 0.55),
+    inset 0 0 0 1px rgba(4, 18, 26, 0.5);
+}
+
+/* 下沉面：暖褐内影在深底上发不出来，换成纯黑 */
+[data-theme="dark"] .g-well {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* 弹层遮罩：深底上用冷黑，比暖褐更贴主题 */
+[data-theme="dark"] .g-overlay {
+  background: rgba(2, 6, 14, 0.62);
+}
+
+/* 骨架微光：白换成冰蓝，扫过时更像扫描线 */
+[data-theme="dark"] .g-skel::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(34, 211, 238, 0.16),
+    transparent
+  );
+}
+
+/* ============================================================
+   基础
+   ============================================================ */
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  font-feature-settings: "cv11" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  /* 应用外壳：整页不滚动，滚动都发生在内部区域，顶栏永远可见。 */
+  height: 100dvh;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+::placeholder {
+  color: var(--faint);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* 数字一律等宽对齐，表格/看板里不会跳动 */
+.t-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ============================================================
+   排版
+   ============================================================ */
+
+.t-display {
+  font-size: var(--fs-display);
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+.t-h1 {
+  font-size: var(--fs-h1);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+}
+
+.t-h2 {
+  font-size: var(--fs-h2);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+.t-body {
+  font-size: var(--fs-body);
+  line-height: 1.55;
+}
+
+.t-label {
+  font-size: var(--fs-body);
+  line-height: 1.45;
+  font-weight: 450;
+}
+
+.t-meta {
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+}
+
+.t-micro {
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+
+/* 小标题：小字号 + 正字距 + 重墨，替代全部大写 */
+.t-eyebrow {
+  display: inline-block;
+  font-size: var(--fs-micro);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.t-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+/* ============================================================
+   纸面纹理与容器
+   ============================================================ */
+
+/* 极细颗粒，破掉纯色平面的"塑料感" */
+.g-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
+}
+
+.g-shell {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.g-body {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.g-container {
+  display: flex;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: 0 var(--space-gutter);
+}
+
+/* 整页滚动（工作台 / 数据） */
+.g-body-scroll {
+  overflow-y: auto;
+}
+
+.g-body-scroll .g-container {
+  padding-bottom: 3.5rem;
+}
+
+/* 撑满视口、内部各自滚动（岗位 / 消息 / 配置） */
+.g-body-fill {
+  overflow: hidden;
+}
+
+/* ============================================================
+   顶栏
+   ============================================================ */
+
+.g-top {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-nav);
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--paper) 84%, transparent);
+  backdrop-filter: saturate(150%) blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+
+.g-top-inner {
+  display: flex;
+  width: 100%;
+  max-width: 1440px;
+  min-height: var(--top-h);
+  margin: 0 auto;
+  align-items: center;
+  gap: 1.75rem;
+  padding: 0 var(--space-gutter);
+}
+
+.g-brand {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+}
+
+.g-brandmark {
+  display: flex;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-full);
+  background: var(--accent-deep);
+  color: var(--paper);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper) 14%, transparent);
+  transition: transform 0.35s var(--ease);
+}
+
+.g-brand:hover .g-brandmark {
+  transform: rotate(-6deg) scale(1.04);
+}
+
+.g-navlink {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  height: 30px;
+  padding: 0 0.7rem;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.18s var(--ease), background-color 0.18s var(--ease);
+}
+
+.g-navlink:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.g-navlink[data-active="true"] {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* 状态芯片：顶栏右侧的本地服务指示 */
+.g-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.45rem;
+  height: 26px;
+  padding: 0 0.62rem;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line);
+  background: var(--sheet);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.g-dot {
+  height: 7px;
+  width: 7px;
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+  background: var(--faint);
+}
+
+/* ============================================================
+   窄屏：顶栏折成两行，导航单独一行并可横向滚动，避免与状态芯片叠在一起
+   ============================================================ */
+
+@media (max-width: 900px) {
+  .g-top-inner {
+    min-height: 0;
+    flex-wrap: wrap;
+    gap: 0.3rem 1rem;
+    padding-top: 0.65rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .g-top-inner > nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .g-top-inner > nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .g-top-side {
+    margin-left: auto;
+  }
+}
+
+/* ============================================================
+   分隔线
+   ============================================================ */
+
+.g-rule {
+  height: 1px;
+  width: 100%;
+  flex-shrink: 0;
+  background: var(--line);
+}
+
+/* 分节标题：左侧短竖线 + 字，比"卡片标题"轻 */
+.g-sect {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.g-sect::before {
+  content: "";
+  height: 0.85em;
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+/* ============================================================
+   面
+   ============================================================ */
+
+/* 抬升面：纸白 + 发丝线 + 极浅暖影 */
+.g-card {
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: var(--sheet);
+  box-shadow: var(--sh-1);
+}
+
+/* 下沉面：比纸面更深，用来装日志/表单/代码这类"内嵌"内容 */
+.g-well {
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--sheet-3);
+  box-shadow: inset 0 1px 2px rgba(72, 55, 30, 0.04);
+}
+
+.g-well-flat {
+  border-radius: var(--r-md);
+  background: var(--sheet-3);
+}
+
+.g-lift {
+  transition: transform 0.34s var(--ease), box-shadow 0.34s var(--ease);
+}
+
+.g-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sh-3);
+}
+
+/* 行：列表/表格用，靠悬停底色而不是斑马纹 */
+.g-row {
+  transition: background-color 0.14s var(--ease);
+}
+
+.g-row:hover {
+  background: color-mix(in srgb, var(--ink) 3.5%, transparent);
+}
+
+.g-row[data-selected="true"] {
+  background: var(--accent-tint);
+}
+
+/* 表头：只有一条底线，不用深色块 */
+.g-thead {
+  background: var(--sheet-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 表头单元格必须保持 table-cell：.t-eyebrow 自带 display:inline-block，
+   挂在 th 上会把表头拆成按文字宽度排列的行内块，导致表头与表体列错位。 */
+.g-thead th {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* 窄屏表格横向滚动时，操作列吸附右侧，动作按钮始终可用。
+   单元格单独铺底色，避免横向滚动时内容从下方穿过。 */
+.g-thead th:last-child,
+.g-row td:last-child {
+  position: sticky;
+  right: 0;
+  background: var(--sheet);
+  box-shadow: -12px 0 12px -12px color-mix(in srgb, var(--ink) 30%, transparent);
+}
+
+.g-thead th:last-child {
+  background: var(--sheet-2);
+  z-index: 20;
+}
+
+.g-row:hover td:last-child {
+  background: color-mix(in srgb, var(--ink) 3.5%, var(--sheet));
+}
+
+.g-row[data-selected="true"] td:last-child {
+  background: color-mix(in srgb, var(--accent) 7%, var(--sheet));
+}
+
+/* 表格放得下时（卡片宽度 > 表格最小宽度）不滚动，吸附列的投影就是多余的 */
+@media (min-width: 1100px) {
+  .g-thead th:last-child,
+  .g-row td:last-child {
+    box-shadow: none;
+  }
+}
+
+/* 薪资胶囊：岗位列表里最该被一眼看到的信息，单独铺底色、加重字重。 */
+.g-salary {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 0.08rem 0.44rem;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--salary) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--salary) 22%, transparent);
+  color: var(--salary);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* 列表里的迷你版，用于会话这种信息密集的行 */
+.g-salary-sm {
+  padding: 0.02rem 0.34rem;
+  border-radius: 5px;
+  font-size: var(--fs-micro);
+}
+
+/* 会话行：头像 + 三行信息，选中时左侧一道主色标记。
+   不用表格，所以内边距自己管。 */
+.g-conv {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.72rem 0.8rem 0.72rem 0.85rem;
+}
+
+.g-conv::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 0;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  transform: translateY(-50%);
+  transition: height 0.22s var(--ease);
+}
+
+.g-conv[data-selected="true"]::before {
+  height: calc(100% - 1rem);
+}
+
+.g-avatar {
+  display: flex;
+  height: 30px;
+  width: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-full);
+  background: var(--soft);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.g-conv:hover .g-avatar {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.g-conv[data-selected="true"] .g-avatar {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/* 紧凑输入框：面板头部这类不该抢视线的搜索框 */
+.g-input-sm {
+  height: 34px;
+  padding: 0 0.65rem 0 1.85rem;
+  font-size: var(--fs-meta);
+}
+
+/* 状态筛选与搜索合成一个整体控件：左边是筛选，右边是搜索，
+   中间一道细分隔线，视觉上是一个字段而不是两个拼在一起的方块。 */
+.g-combo {
+  display: flex;
+  height: 34px;
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
+}
+
+.g-combo-selwrap {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.g-combo-sel {
+  appearance: none;
+  height: 34px;
+  padding: 0 1.2rem 0 0.6rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  outline: none;
+}
+
+.g-combo-chev {
+  position: absolute;
+  right: 0.34rem;
+  pointer-events: none;
+  color: var(--faint);
+}
+
+.g-combo-div {
+  flex-shrink: 0;
+  width: 1px;
+  height: 15px;
+  background: var(--line);
+}
+
+.g-combo-input {
+  height: 34px;
+  padding: 0 0.6rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-meta);
+  outline: none;
+}
+
+.g-combo:focus-within {
+  border-color: var(--accent);
+  background: var(--sheet);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+/* ============================================================
+   按钮
+   ============================================================ */
+
+.g-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: var(--r-sm);
+  padding: 0.5rem 0.85rem;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 0.16s var(--ease), color 0.16s var(--ease),
+    transform 0.16s var(--ease), border-color 0.16s var(--ease),
+    box-shadow 0.16s var(--ease);
+}
+
+.g-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.g-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.g-btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--sh-accent);
+}
+
+.g-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hi);
+}
+
+.g-btn-danger {
+  background: var(--bad);
+  color: #fff;
+}
+
+.g-btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 86%, #000);
+}
+
+.g-btn-soft {
+  border: 1px solid var(--line-2);
+  background: var(--sheet);
+  color: var(--text);
+  box-shadow: var(--sh-1);
+}
+
+.g-btn-soft:hover:not(:disabled) {
+  background: var(--sheet-2);
+  border-color: var(--muted);
+}
+
+.g-btn-ghost {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
+.g-btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
+}
+
+.g-btn-plain {
+  background: transparent;
+  color: var(--muted);
+  padding: 0.35rem 0.5rem;
+}
+
+.g-btn-plain:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* ============================================================
+   表单控件
+   ============================================================ */
+
+.g-field {
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--sheet-2);
+  color: var(--ink);
+  transition: border-color 0.16s var(--ease), background-color 0.16s var(--ease),
+    box-shadow 0.16s var(--ease);
+}
+
+.g-field:hover:not(:disabled) {
+  border-color: var(--line-2);
+}
+
+.g-field:focus,
+.g-field:focus-visible {
+  outline: none;
+  background: var(--sheet);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.g-input {
+  padding: 0.45rem 0.7rem;
+  font-size: var(--fs-body);
+}
+
+/* 纯数值输入框：数字在框内居中 */
+input.t-num {
+  text-align: center;
+}
+
+/* ============================================================
+   进度与图表
+   ============================================================ */
+
+.g-track {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.g-fill {
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  transition: width 0.5s var(--ease);
+}
+
+/* 数据页的柱状：底部对齐、顶端按数值 */
+.g-col {
+  width: 100%;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--accent);
+  transition: height 0.5s var(--ease), background-color 0.2s var(--ease);
+}
+
+/* ============================================================
+   弹层
+   ============================================================ */
+
+.g-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: color-mix(in srgb, #3a2b16 26%, transparent);
+  backdrop-filter: blur(3px);
+  animation: g-fade 0.2s var(--ease) both;
+}
+
+.g-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: var(--z-dialog);
+  transform: translate(-50%, -50%);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-2);
+  background: var(--sheet);
+  padding: 1.5rem;
+  box-shadow: var(--sh-3);
+  animation: g-pop 0.24s var(--ease) both;
+}
+
+.g-menu {
+  z-index: var(--z-pop);
+  min-width: 140px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-2);
+  background: var(--sheet);
+  box-shadow: var(--sh-3);
+  padding: 0.3rem;
+  animation: g-menu-in 0.16s var(--ease) both;
+}
+
+.g-menu-item {
+  display: flex;
+  width: 100%;
+  cursor: pointer;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--r-xs);
+  padding: 0.45rem 0.6rem;
+  font-size: var(--fs-meta);
+  color: var(--text);
+}
+
+.g-menu-item:hover,
+.g-menu-item[data-highlighted] {
+  background: var(--accent-tint);
+  color: var(--accent-deep);
+}
+
+/* ============================================================
+   滚动条 / 骨架 / 空态 / 无障碍
+   ============================================================ */
+
+.g-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+.g-scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.g-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.g-scroll::-webkit-scrollbar-thumb {
+  border-radius: var(--r-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  background-color: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.g-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+
+.g-skel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.g-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, #fff 70%, transparent),
+    transparent
+  );
+  animation: g-shimmer 1.5s var(--ease) infinite;
+}
+
+/* 空态：虚线围出的"待填"区域，而不是插画 */
+.g-empty {
+  border-radius: var(--r-lg);
+  border: 1px dashed var(--line-2);
+  background: color-mix(in srgb, var(--sheet) 60%, transparent);
+}
+
+.g-skip {
+  position: fixed;
+  left: -9999px;
+  top: 0.75rem;
+  z-index: var(--z-boot);
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.5rem 0.85rem;
+  font-size: var(--fs-meta);
+  text-decoration: none;
+}
+
+.g-skip:focus {
+  left: 0.75rem;
+}
+
+/* 分隔线：父容器里给相邻子项之间画一条，比逐个加 border 干净 */
+.g-divided > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.g-divided-soft > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+/* ============================================================
+   动画
+   ============================================================ */
+
+@keyframes g-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 下拉菜单：从字段正下方浮出。注意不能复用 g-pop —— 那是给居中弹窗用的，
+   带着 translate(-50%, -50%)，用在非居中的菜单上会把整块挪出视口。 */
+@keyframes g-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes g-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes g-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes g-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes g-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes g-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes g-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+/* 入场：错峰上浮 */
+.g-in {
+  animation: g-rise 0.45s var(--ease) both;
+}
+
+.g-in-slide {
+  animation: g-slide-in 0.28s var(--ease) both;
+}
+
+.g-breathe {
+  animation: g-breathe 1.9s var(--ease) infinite;
+}
+
+.g-pulse {
+  animation: g-breathe 1.5s var(--ease) infinite;
+}
+
+/* 旋转：给 lucide 的 Loader 之类图标套上 */
+.g-spin {
+  animation: g-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

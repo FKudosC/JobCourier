@@ -1,0 +1,234 @@
+"""职位入库测试。"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from job import models as models_pkg
+from job.boss.jobs import Job
+from job.models import db_session, init_db, reset_engine
+from job.models.job import JobRow
+
+
+@pytest.fixture()
+def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(models_pkg, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
+    reset_engine()
+    init_db()
+    yield tmp_path / "test.db"
+    reset_engine()
+
+
+def _job(uid: str, **kw) -> Job:
+    return Job(job_id=uid, title=kw.pop("title", f"岗位{uid}"), company="某公司", **kw)
+
+
+def test_record_inserts_then_updates_keeping_created_at(tmp_db):
+    job = Job(job_id="xyz", title="AI 工程师", company="某公司", salary="20-30K")
+    first = JobRow.record(job, reason="符合筛选条件", applied=True)
+    second = JobRow.record(job.model_copy(update={"description": "负责落地"}))
+
+    assert JobRow.count() == 1
+    assert second.created_at == first.created_at
+    assert second.updated_at >= first.updated_at
+    row = JobRow.get_dict("xyz")
+    assert row["title"] == "AI 工程师" and row["description"] == "负责落地"
+
+
+def test_record_keeps_brand_id_and_set_brand_id(tmp_db):
+    JobRow.record(_job("1", brand_id="b1"))
+    assert JobRow.record(_job("1")).brand_id == "b1"
+    assert JobRow.set_brand_id("1", "b2") is True
+    assert JobRow.get_dict("1")["brandId"] == "b2"
+    assert JobRow.set_brand_id("missing", "b3") is False
+
+
+def test_migrate_brand_id_adds_column_to_old_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE job (uid VARCHAR PRIMARY KEY, title VARCHAR)")
+        conn.execute("INSERT INTO job (uid, title) VALUES ('1', '老岗位')")
+    monkeypatch.setattr(models_pkg, "DB_PATH", db)
+    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
+    reset_engine()
+    try:
+        models_pkg.get_engine()
+        with sqlite3.connect(db) as conn:
+            assert conn.execute("SELECT brand_id FROM job").fetchone() == ("",)
+    finally:
+        reset_engine()
+
+
+def test_result_and_reason(tmp_db):
+    JobRow.record(_job("a"), reason="技术栈吻合", applied=True)
+    JobRow.record(_job("b"), suitable=False, reason="外包公司")
+    JobRow.record(_job("c"), reason="符合筛选条件")
+
+    a, b, c = (JobRow.get_dict(u) for u in "abc")
+    assert (a["result"], a["reason"]) == ("已投递", "技术栈吻合")
+    assert (b["result"], b["reason"]) == ("不合适", "外包公司")
+    assert c["result"] == "已沟通过"
+    assert (a["suitable"], b["suitable"]) == (True, False)
+    assert JobRow.count_applied() == 1
+    everything, yes, no = JobRow.SUITABLE_FILTERS
+    assert JobRow.count(suitable=everything) == 3
+    assert JobRow.count(suitable=yes) == 2
+    assert [r["uid"] for r in JobRow.list_dicts(suitable=no)] == ["b"]
+
+
+def test_filter_by_uid(tmp_db):
+    JobRow.record(_job("a"))
+    JobRow.record(_job("b"))
+    assert JobRow.count(uid="b") == 1
+    assert [r["uid"] for r in JobRow.list_dicts(uid="b")] == ["b"]
+    assert JobRow.count(uid="missing") == 0
+
+
+def test_applied_outranks_late_rescore(tmp_db):
+    """投递后补评分给出低分，只改分数与原因，结果仍是「已投递」，且不会被「不合适」筛掉。"""
+    JobRow.record(_job("a"), reason="AI 复核失败，未评分", applied=True)
+    assert JobRow.set_verdict("a", suitable=False, reason="匹配度 52 分", score=52)
+
+    row = JobRow.get_dict("a")
+    assert (row["applied"], row["suitable"]) == (True, False)
+    assert row["result"] == "已投递"
+    assert row["matchStatus"] == "52 分"
+
+    _, yes, no = JobRow.SUITABLE_FILTERS
+    assert JobRow.count(suitable=yes) == 1
+    assert JobRow.list_dicts(suitable=no) == []
+
+
+def test_count_today_only_counts_applied(tmp_db):
+    JobRow.record(_job("new"), applied=True)
+    JobRow.record(_job("old"), applied=True)
+    JobRow.record(_job("skip"), suitable=False, reason="外包公司")
+    with db_session() as session:
+        row = session.get(JobRow, "old")
+        row.created_at = datetime.now(UTC) - timedelta(days=2)
+        session.add(row)
+        session.commit()
+    assert JobRow.count() == 3
+    assert JobRow.count_today() == 1
+
+
+def test_find_duplicate_by_id_or_title_company_hr(tmp_db):
+    JobRow.record(_job("a", title="AI 工程师", hr_name="张女士"), suitable=False)
+
+    assert JobRow.find_duplicate(_job("a", title="改名")) is not None
+    same = _job("b", title="AI 工程师", hr_name="张女士")
+    assert JobRow.find_duplicate(same).uid == "a"
+    assert JobRow.find_duplicate(_job("c", title="AI 工程师", hr_name="李先生")) is None
+    assert JobRow.find_duplicate(_job("d", title="Java", hr_name="张女士")) is None
+
+
+def test_set_verdict(tmp_db):
+    JobRow.record(_job("a"), score=70, applied=True)
+    assert JobRow.set_verdict("a", suitable=False, reason="外包公司", score=88)
+    row = JobRow.get_dict("a")
+    assert (row["suitable"], row["reason"], row["matchStatus"]) == (
+        False,
+        "外包公司",
+        "88 分",
+    )
+    assert JobRow.set_verdict("a", suitable=True, reason="Agent 方向", score=None)
+    assert JobRow.get_dict("a")["matchStatus"] == "88 分"
+    assert not JobRow.set_verdict("missing", suitable=True, reason="", score=None)
+
+
+def test_analysis_filter_and_score_kept_on_rescrape(tmp_db):
+    for uid, score in (("a", 90), ("b", 60), ("c", None)):
+        JobRow.record(_job(uid), score=score)
+    _, analyzed, pending, high = JobRow.ANALYSIS_FILTERS
+
+    assert JobRow.count(analysis=analyzed) == 2
+    assert JobRow.count(analysis=pending) == 1
+    assert [r["uid"] for r in JobRow.list_dicts(analysis=high)] == ["a"]
+    assert JobRow.get_dict("a")["matchHigh"] is True
+    assert JobRow.get_dict("c")["matchStatus"] == "未分析"
+
+    JobRow.record(_job("a"))
+    assert JobRow.get_dict("a")["matchStatus"] == "90 分"
+    JobRow.record(_job("a"), score=70)
+    assert JobRow.get_dict("a")["matchStatus"] == "70 分"
+
+
+def test_to_json_exports_all_or_selected(tmp_db):
+    description = "负责 Agent, 含逗号\n换行"
+    JobRow.record(
+        _job("a", description=description), reason="技术栈吻合", score=88, applied=True
+    )
+    JobRow.record(_job("b"), suitable=False, reason="外包公司")
+
+    text, count = JobRow.to_json()
+    data = json.loads(text)
+    assert count == 2
+    assert set(data[0]) == set(JobRow.model_fields) | {"result"}
+    a, b = ({j["uid"]: j for j in data}[k] for k in ("a", "b"))
+    assert (a["suitable"], a["applied"], a["match_score"], a["result"]) == (
+        True,
+        True,
+        88,
+        "已投递",
+    )
+    assert a["reason"] == "技术栈吻合" and a["description"] == description
+    assert (b["suitable"], b["applied"], b["match_score"], b["result"]) == (
+        False,
+        False,
+        None,
+        "不合适",
+    )
+    assert datetime.fromisoformat(a["created_at"]).tzinfo is not None
+
+    text, count = JobRow.to_json(["b"])
+    assert count == 1 and [j["uid"] for j in json.loads(text)] == ["b"]
+
+
+def test_list_dicts_sort_by_score(tmp_db):
+    for uid, score in (("a", 60), ("b", 90), ("c", None), ("d", 75)):
+        JobRow.record(_job(uid), score=score)
+
+    assert [r["uid"] for r in JobRow.list_dicts(sort="score_desc")] == ["b", "d", "a", "c"]
+    assert [r["uid"] for r in JobRow.list_dicts(sort="score_asc")] == ["a", "d", "b", "c"]
+
+
+def test_list_dicts_sort_by_salary_puts_unknown_last(tmp_db):
+    # 薪资是自由文本：K / 月、万 / 月、元 / 天混排，识别不到的「面议」排最后。
+    salaries = {"a": "20-30K", "b": "面议", "c": "15K", "d": "1.5-2万/月", "e": "200-300元/天"}
+    for uid, salary in salaries.items():
+        JobRow.record(_job(uid, salary=salary))
+
+    assert [r["uid"] for r in JobRow.list_dicts(sort="salary_desc")] == ["a", "d", "c", "e", "b"]
+    assert [r["uid"] for r in JobRow.list_dicts(sort="salary_asc")] == ["e", "c", "d", "a", "b"]
+
+
+def test_list_dicts_sort_falls_back_to_newest_first(tmp_db):
+    for uid in "abc":
+        JobRow.record(_job(uid))
+
+    for sort in ("", "unknown"):
+        assert [r["uid"] for r in JobRow.list_dicts(sort=sort)] == ["c", "b", "a"]
+
+
+def test_salary_monthly_normalizes_units():
+    # 时薪 / 日薪 / 月薪 / 年薪都能折算成同一个月度量级，供排序比较。
+    from job.boss.salary import monthly_estimate
+
+    hourly = monthly_estimate("500-1000元/时")
+    daily = monthly_estimate("200-250元/天")
+    monthly = monthly_estimate("20-30K")
+    yearly = monthly_estimate("24-36万/年")
+    assert hourly and daily and monthly and yearly
+    assert hourly > monthly > daily
+    assert monthly == 25000
+    assert yearly == 25000
+    assert monthly_estimate("面议") is None

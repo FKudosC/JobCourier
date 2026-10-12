@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="小投 JobCourier">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#12807c"/>
+      <stop offset="0.55" stop-color="#0f6f6c"/>
+      <stop offset="1" stop-color="#0a4d4b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.26" cy="0.2" r="0.85">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="plane" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e2efee"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#glow)"/>
+
+  <g transform="translate(512 512) scale(27.5) translate(-12.5 -12)">
+    <path d="M3.4 20.6 21.6 12 3.4 3.4 3.4 10.1 14.6 12 3.4 13.9Z" fill="url(#plane)"/>
+  </g>
+
+  <rect x="0.5" y="0.5" width="1023" height="1023" rx="227.5" fill="none" stroke="#ffffff" stroke-opacity="0.14"/>
+</svg>

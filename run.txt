@@ -1,0 +1,59 @@
+小投 · JobCourier 运行说明
+==========================
+
+环境要求（只需装一次）
+  - Python 3.12，用 uv 管理：https://docs.astral.sh/uv/
+  - Node.js（自带 npm）
+  - Google Chrome（自动投递通过本机 Chrome 完成）
+
+
+首次启动（两行）
+  1) 打开 PowerShell，进入项目目录：
+       cd <项目目录>
+  2) 运行启动脚本：
+       .\start-jobcourier.cmd
+
+  首次运行脚本会自动补齐环境，无需手动操作：
+     uv sync            -> 安装后端依赖，生成 .venv
+     npm ci             -> 安装前端依赖
+     npm run build      -> 构建前端到 frontend/dist/
+     然后启动服务，并在就绪后自动打开浏览器。
+
+
+以后每次启动
+  双击 start-jobcourier.cmd，或在项目目录执行：
+       .\start-jobcourier.cmd
+
+  一条命令版：
+       cd <项目目录>; .\start-jobcourier.cmd
+
+
+手动分步启动（可选，方便排查）
+       cd <项目目录>
+       uv sync
+       cd frontend
+       npm ci
+       npm run build
+       cd ..
+       uv run python -m job
+
+
+访问与停止
+  - 浏览器访问：http://127.0.0.1:8000   （前后端同源，只有这一个端口）
+  - 就绪自检：curl http://127.0.0.1:8000/ping   返回 {"ok":true} 即正常
+  - 停止：在运行窗口按 Ctrl+C
+
+
+数据存放
+  - 运行期数据都在 user_data/：数据库 job-courier.db、简历 resumes/、
+    Chrome 登录态 chrome-profile/、日志 logs/。
+    首次运行自动生成，已被 .gitignore 排除，不会提交到仓库。
+  - 想换位置（例如同步盘）：启动前设置环境变量 JOB_COURIER_DATA_DIR 指向目标目录。
+
+
+常见问题
+  - 提示找不到 uv：先安装 https://docs.astral.sh/uv/
+  - 提示 npm 不是命令：先安装 Node.js
+  - 打开后长时间显示"正在启动"：首次要构建前端，等 1 分钟左右；
+    仍不行请查看 user_data/logs/backend.log
+  - 改了前端界面代码后不生效：先执行 npm run build 再重启服务
