@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  夹具：webuploader 式上传栏——同一格里一个只读文本框（显示文件名）+ 一个真正的
+  input[type=file]，扫出来本该是同一栏的两行。公司、岗位都是编造的样例数据。
+  期望：扫描器把只读的「影子」文本框丢掉，只留一行上传栏。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>应聘登记 - 云栖数据</title>
+  </head>
+  <body>
+    <h1>应聘登记表</h1>
+    <form action="/apply" method="post">
+      <table class="form-table">
+        <tr>
+          <td class="lab">姓名</td>
+          <td><input name="shName" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">简历上传</td>
+          <td>
+            <input id="Resume_ResumeUrl" name="Resume_ResumeUrl" type="text" readonly="readonly" />
+            <div class="uploader"><input id="Resume_File" name="Resume_File" type="file" /></div>
+          </td>
+        </tr>
+        <tr>
+          <td class="lab">生活照上传</td>
+          <td>
+            <input id="Resume_PhotoUrl" name="Resume_PhotoUrl" type="text" readonly="readonly" />
+            <div class="uploader"><input id="Photo_File" name="Photo_File" type="file" /></div>
+          </td>
+        </tr>
+      </table>
+      <button type="submit">提交</button>
+    </form>
+  </body>
+</html>

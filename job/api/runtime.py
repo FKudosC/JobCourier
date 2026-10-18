@@ -93,7 +93,7 @@ class Runtime:
         self.scraper = JobScraper(self.session)
         self.prefetcher = CompanyPrefetcher(self._make_company_checker)
         self.responder = ChatResponder(self.session, self.prefetcher)
-        self.apply_assistant = ApplyAssistant(self.session)
+        self.apply_assistant = ApplyAssistant(self.session, on_update=self._apply_update)
         self.scraper.company_prefetcher = self.prefetcher
         self.scraper.auto_resume_hook = self._auto_resume_for
         # 界面快照（与原工作台字段一一对应）
@@ -104,7 +104,11 @@ class Runtime:
         self.reply_count = 0
         self.recv_count = 0
         self.reply_skip_count = 0
-        self.browser_background = False
+        # 开关状态从库里读回来：界面刷新后不该自己弹回「未开启」
+        self.browser_background = BrowserSettings.load().background
+        # 会话按这个开关决定「窗口压在屏幕外」还是「摆在屏幕上」，
+        # 任务代码不许再自作主张把窗口顶到前台
+        self.session.background = self.browser_background
         self.stored_count = 0
         self.session_count = 0
         self.dup_count = 0
@@ -116,7 +120,6 @@ class Runtime:
         self.analyze_state: dict = {"analyzing": False, "analyzed": 0, "total": 0}
         # 批量查企业进度：{running, done, total, name}
         self.company_state: dict = {"running": False, "done": 0, "total": 0, "name": ""}
-
     # --- 基础设施 ---
 
     def _make_company_checker(self) -> CompanyChecker:
@@ -135,6 +138,26 @@ class Runtime:
 
     def publish_status(self) -> None:
         self.bus.publish({"type": "status", **self.snapshot()})
+
+    def _apply_update(
+        self,
+        task: dict,
+        learned: list[dict] | None = None,
+        outcome: dict | None = None,
+    ) -> None:
+        """网申后台补全跑完：把最新的任务推给所有页面，网申面板据此刷新。
+
+        ``learned`` 是这一趟新记进资料库的条目，面板拿它提示用户「已记住」。
+        ``outcome`` 是后台填表的结果统计，面板拿它提示「已填几项、几项待手动」。
+        """
+        self.bus.publish(
+            {
+                "type": "apply_done",
+                "task": task,
+                "learned": learned or [],
+                "outcome": outcome or {},
+            }
+        )
 
     def clear_logs(self) -> None:
         """清空运行日志并广播，让所有已连接页面同步清空。"""
@@ -195,6 +218,8 @@ class Runtime:
 
         self.busy = True
         self.boss_state = "准备中"
+        # 任务开跑：收回「用户正看着浏览器」的状态，全程不再把窗口顶到前台
+        self.session.watch_off()
         self.session_count = 0
         self.dup_count = 0
         self.skip_count = 0
@@ -327,6 +352,8 @@ class Runtime:
         self.reply_count = 0
         self.recv_count = 0
         self.reply_skip_count = 0
+        # 任务开跑：收回「用户正看着浏览器」的状态，全程不再把窗口顶到前台
+        self.session.watch_off()
         self.push_log(f"开始自动回复：{pace.describe()}")
         if settings.confirm_before_send:
             self.push_log("已开启发送前确认：AI 的回复会先进入「消息」页待你确认")
@@ -393,8 +420,11 @@ class Runtime:
             if not self.session.is_open:
                 self.push_log("正在打开浏览器…")
                 await self.session.open()
-            await self.session.set_background(False)
-            self.push_log("浏览器窗口已调到屏幕前；想继续后台运行就打开「后台静默运行」开关")
+            # 只把窗口调出来看一次，不动「后台静默运行」这个长期设置；
+            # 想让它一直留在屏幕上，去工作台切那个开关。
+            if not await self.session.surface():
+                raise ApiError("浏览器窗口没能调到屏幕前，请再点一次或重启本地服务")
+            self.push_log("浏览器窗口已调到屏幕前；想收回任务栏就打开「后台静默运行」开关")
         except (RuntimeError, PlaywrightError) as exc:
             self.push_log(f"打开浏览器失败：{exc}", "warn")
             raise ApiError(f"打开浏览器失败：{exc}") from exc
@@ -404,15 +434,18 @@ class Runtime:
         BrowserSettings(background=value).save()
         self.browser_background = value
         if self.session.is_open:
-            await self.session.set_background(value)
-            self.push_log(
-                "浏览器窗口已移出屏幕，继续后台运行；想看时再切一次这个开关"
-                if value
-                else "浏览器窗口已调回屏幕，查看完可再打开开关移回后台",
-            )
+            moved = await self.session.set_background(value)
+            if not value and not moved:
+                self.push_log("浏览器窗口没能调回屏幕，点「查看浏览器」重试", "warn")
+            else:
+                self.push_log(
+                    "浏览器窗口已收回任务栏，继续后台运行；想看时点任务栏图标或再切一次这个开关"
+                    if value
+                    else "浏览器窗口已调回屏幕，查看完可再打开开关收回任务栏",
+                )
         else:
             self.push_log(
-                "已开启后台静默模式：浏览器窗口移出屏幕"
+                "已开启后台静默模式：浏览器窗口最小化到任务栏"
                 if value
                 else "已关闭后台静默模式：想看浏览器时用「查看浏览器」调出",
             )
@@ -523,6 +556,9 @@ class Runtime:
         async def on_step(text: str) -> None:
             self.bus.publish({"type": "company_step", "job_uid": job_uid, "step": text})
 
+        # 查企业是后台任务：开跑前收回「用户正看着浏览器」的状态，
+        # 免得用户刚点过「填表 / 查看浏览器」的窗口被这一趟顶到面前
+        self.session.watch_off()
         await on_step("正在打开浏览器…")
         try:
             brand_id = await checker.check(job_uid, on_step)
@@ -550,6 +586,8 @@ class Runtime:
         if not targets:
             raise ApiError("这些岗位的公司都查过了，无需重复查询")
         self.company_state = {"running": True, "done": 0, "total": len(targets), "name": ""}
+        # 后台任务开跑：收回「用户正看着浏览器」的状态，全程不把窗口顶到前台
+        self.session.watch_off()
         self.push_log(f"开始批量查企业：共 {len(targets)} 家公司")
         self.publish_status()
         asyncio.create_task(self._company_scan_task(targets))

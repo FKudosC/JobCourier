@@ -1,0 +1,33 @@
+<!doctype html>
+<!--
+  夹具：扁平写法，标签是控件前面的兄弟节点（siblingText 路径）；混入一栏无关字段。
+  公司、岗位、选项都是编造的样例数据，不含任何真实个人信息。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>实习生招募 - 长风生物</title>
+  </head>
+  <body>
+    <h1>实习生招募</h1>
+    <form action="/apply" method="post">
+      <div class="form">
+        <span class="lab">GitHub</span>
+        <input name="gh" type="text" />
+
+        <span class="lab">个人主页</span>
+        <input name="home" type="text" />
+
+        <span class="lab">到岗时间</span>
+        <input name="join" type="text" />
+
+        <span class="lab">自我介绍</span>
+        <textarea name="intro" rows="4"></textarea>
+
+        <span class="lab">兴趣爱好</span>
+        <textarea name="hobby" rows="3"></textarea>
+      </div>
+      <button type="submit">提交</button>
+    </form>
+  </body>
+</html>

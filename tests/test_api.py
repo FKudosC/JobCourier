@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
@@ -176,3 +177,63 @@ def test_clear_logs_clears_and_broadcasts(client: TestClient):
         assert sub.get_nowait() == {"type": "logs_cleared"}
     finally:
         runtime.bus.unsubscribe(sub)
+
+
+def test_upload_resume_and_photo(client: TestClient):
+    """上传简历 / 寸照都落到数据目录并写回配置；非图片的寸照要被挡下。"""
+    from pypdf import PdfWriter
+
+    buf = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.write(buf)
+
+    resume = client.post(
+        "/api/config/resume/upload",
+        files={"file": ("resume.pdf", buf.getvalue(), "application/pdf")},
+    )
+    assert resume.status_code == 200
+    assert Path(resume.json()["resume_path"]).is_file()
+
+    photo = client.post(
+        "/api/config/photo/upload",
+        files={"file": ("me.jpg", b"jpeg-bytes", "image/jpeg")},
+    )
+    assert photo.status_code == 200
+    saved = Path(photo.json()["photo_path"])
+    assert saved.is_file() and saved.read_bytes() == b"jpeg-bytes"
+
+    bad = client.post(
+        "/api/config/photo/upload",
+        files={"file": ("me.txt", b"not-an-image", "text/plain")},
+    )
+    assert bad.status_code == 400
+
+
+def test_telemetry_config_round_trip(client: TestClient):
+    """链路追踪默认全关；接口能存导出方式与采集端地址，认不出的导出方式退回 console。"""
+    assert client.get("/api/config").json()["telemetry"] == {
+        "enabled": False,
+        "exporter": "console",
+        "endpoint": "",
+        "content": False,
+    }
+
+    saved = client.put(
+        "/api/config/telemetry",
+        json={
+            "enabled": True,
+            "exporter": "otlp",
+            "endpoint": "http://127.0.0.1:4318/v1/traces",
+            "content": False,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["enabled"] is True and saved.json()["exporter"] == "otlp"
+    assert client.get("/api/config").json()["telemetry"]["endpoint"].endswith("/v1/traces")
+
+    # 不认识的导出方式一律退回 console，免得配错之后静默丢 span
+    fallback = client.put(
+        "/api/config/telemetry", json={"enabled": True, "exporter": "jaeger"}
+    ).json()
+    assert fallback["exporter"] == "console"

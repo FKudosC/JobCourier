@@ -79,3 +79,30 @@ def test_flags_shrunk_draft():
 
 def test_empty_draft():
     assert validate(MASTER, "") == ["定制结果为空"]
+
+def test_accepts_date_format_rewrite():
+    """母版写 2017.09，生成稿改写成「2017年9月」不算新事实。"""
+    master = "教育经历\n中山大学 | 2017.09-2021.06\n"
+    draft = "教育经历\n中山大学 | 2017年9月 - 2021年6月\n"
+    assert validate(master, draft) == []
+
+
+def test_accepts_phone_with_and_without_separators():
+    """手机号带不带分隔符是同一事实。"""
+    master = "张三\n手机：138-0013-8000\n"
+    draft = "张三\n手机：13800138000\n"
+    assert validate(master, draft) == []
+
+
+def test_accepts_ocr_confusable_digit():
+    """母版把 1500 误录成 I500，生成稿写成 1500 不该被判成编造。"""
+    master = "校园经历\n累计吸引I500人次参与\n"
+    draft = "校园经历\n累计吸引1500人次参与\n"
+    assert validate(master, draft) == []
+
+
+def test_accepts_thousand_separator_variant():
+    """1500 与 1,500 是同一个数。"""
+    master = "项目经历\n日均 1500 单\n"
+    draft = "项目经历\n日均 1,500 单\n"
+    assert validate(master, draft) == []

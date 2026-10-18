@@ -55,21 +55,49 @@ INSTITUTION_WORDS: tuple[str, ...] = (
     "学校",
 )
 
-# 数字与日期事实：邮箱 / 链接 / 电话 / 年月 / 一切带数字的串
+# 数字与日期事实：邮箱 / 链接 / 手机号 / 年月 / 其余数字
+# 手机号排在年月前面，否则 138-0013-8000 里的 8137-67 会被当成「年月」。
 _FACT_TOKEN = re.compile(
     r"[\w.+-]+@[\w-]+\.[\w.]+"  # 邮箱
     r"|https?://\S+"  # 链接
+    r"|(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d(?:[-\s]?\d){8}(?!\d)"  # 手机号（可带分隔）
     r"|\d{4}\s*[年.·/-]\s*\d{1,2}\s*月?"  # 年月
-    r"|\d+(?:\.\d+)?"  # 其余一切数字（含小数）
+    r"|\d+(?:[.,]\d+)*"  # 其余数字（含小数、千分位）
 )
+# 简历里常见的 OCR 误识：字母 I/l 被写成数字 1（如 I500 → 1500）。
+# 只在「前面不是字母数字、后面跟着至少两位数字」时替换，避免动到 IP、ISO 这类词。
+_OCR_DIGIT = re.compile(r"(?<![A-Za-z0-9])[Il](?=\d{2,})")
+_YEAR_MONTH = re.compile(r"(\d{4})\s*[年.·/-]\s*(\d{1,2})\s*月?")
 # 全角数字与常见分隔符归一化，避免「１０」或「1,000」绕过核对
 _FULLWIDTH = str.maketrans("０１２３４５６７８９．，", "0123456789.,")
+
+
+def _norm_fact(raw: str) -> str:
+    """把同一事实的不同写法归一成同一个 token。
+
+    日期统一成 ``YYYY-MM``、手机号去掉分隔符、千分位逗号去掉，邮箱与链接转小写。
+    否则母版写 ``2024.06``、生成稿写 ``2024年6月`` 就会被当成两个事实。
+    """
+    token = raw.strip()
+    if "@" in token or token.lower().startswith("http"):
+        return token.lower().rstrip(".,;)]，。；）")
+    if match := _YEAR_MONTH.fullmatch(token):
+        year, month = int(match.group(1)), int(match.group(2))
+        if 1 <= month <= 12:
+            return f"{year}-{month:02d}"
+    digits = re.sub(r"\D", "", token)
+    if len(digits) == 13 and digits.startswith("86"):
+        digits = digits[2:]
+    if len(digits) == 11 and digits.startswith("1"):
+        return digits
+    return token.replace(",", "")
 
 
 def _fact_tokens(text: str) -> set[str]:
     """提取母版的事实 token 集合，供生成稿逐个核对。"""
     normalized = (text or "").translate(_FULLWIDTH)
-    return {match.group(0).replace(" ", "") for match in _FACT_TOKEN.finditer(normalized)}
+    normalized = _OCR_DIGIT.sub("1", normalized)
+    return {_norm_fact(match.group(0)) for match in _FACT_TOKEN.finditer(normalized)}
 
 
 class ResumeTailor(BaseModel):

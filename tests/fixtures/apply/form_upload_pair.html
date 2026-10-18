@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  夹具：官网实测里最麻烦的一种上传栏——同一格里一个「可编辑」的文件名框（不是
+  readonly）、一个隐藏域，最后才是真正的 input[type=file]；三者并不相邻。
+  公司、岗位都是编造的样例数据。
+  期望：只读/可编辑的影子框都要丢掉，每栏只剩「简历上传」「生活照上传」两行，
+  且分别认领成 resume / photo。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>应聘登记 - 澜石智造</title>
+  </head>
+  <body>
+    <h1>应聘登记表</h1>
+    <form action="/apply" method="post">
+      <table class="form-table">
+        <tr>
+          <td class="lab">姓名</td>
+          <td><input name="shName" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">简历上传</td>
+          <td>
+            <div class="uploader">
+              <input id="Resume_FileName" name="Resume_FileName" type="text" required />
+              <input name="Resume_Token" type="hidden" value="" />
+              <input id="Resume_File" name="Resume_File" type="file" />
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="lab">生活照上传</td>
+          <td>
+            <div class="uploader">
+              <input id="Photo_FileName" name="Photo_FileName" type="text" required />
+              <input name="Photo_Token" type="hidden" value="" />
+              <input id="Photo_File" name="Photo_File" type="file" />
+            </div>
+          </td>
+        </tr>
+      </table>
+      <button type="submit">提交</button>
+    </form>
+  </body>
+</html>

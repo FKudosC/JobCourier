@@ -4,8 +4,10 @@ import {
   Ban,
   Check,
   ClipboardList,
+  Eye,
   FileText,
   FileUp,
+  GitBranch,
   ListFilter,
   MessagesSquare,
   Plus,
@@ -36,14 +38,20 @@ import {
 } from "../ui";
 
 import type {
+  ApplyLearnedRow,
   ApplyProfile,
+  ApplyTreeNode,
+  Auto,
   BlackRow,
   Bundle,
+  Captcha,
   ListField,
   Llm,
   LlmForm,
+  Locate,
   ReplyForm,
   SearchForm,
+  Vision,
 } from "./config/types";
 import {
   DelayInput,
@@ -55,10 +63,16 @@ import {
   SetGrid,
   TagEditor,
 } from "./config/parts";
+import { ProfileTree, sourceTone } from "./config/ProfileTree";
 
 const RESUME_ACCEPT = ".pdf,.docx,.jpg,.jpeg,.png,.bmp,.webp";
 const CUSTOM = "自定义";
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
+/** 网申填表的交付口径：界面上用中文标签，落到配置里是三个英文枚举。 */
+const HANDOFF_OPTIONS = ["宽松", "中档", "严格"];
+const HANDOFF_IDS: Record<string, string> = { 宽松: "loose", 中档: "balanced", 严格: "strict" };
+const HANDOFF_LABELS: Record<string, string> = { loose: "宽松", balanced: "中档", strict: "严格" };
 
 /** API Key 只回显掩码，明文留在本机；提交掩码或空串时后端沿用已存的 Key。 */
 function toLlmForm(llm: Llm): LlmForm {
@@ -85,7 +99,10 @@ function toForm(b: Bundle): SearchForm {
     salary_min: b.salary_min,
     salary_max: b.salary_max,
     resume_path: b.resume_path,
+    resume_size: b.resume_size,
     resume_text: b.resume_text,
+    photo_path: b.photo_path,
+    photo_size: b.photo_size,
   };
 }
 
@@ -106,6 +123,86 @@ function fileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
+/** 简历 / 寸照的本地预览地址：后端只放行数据目录下的那两个文件夹。 */
+function previewUrl(path: string): string {
+  return `/api/config/file?path=${encodeURIComponent(path)}`;
+}
+
+const IMAGE_SUFFIX_RE = /\.(jpe?g|png|bmp|webp|gif)$/i;
+
+/** 文件大小：只标到 KB / MB 一位小数，够看就行。 */
+function fileSize(bytes: number): string {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 一个附件位：缩略图 + 名称 / 大小 + 上传 / 预览，整块是一张卡片。 */
+function AttachRow({
+  label,
+  path,
+  size,
+  empty,
+  loading,
+  accept,
+  inputRef,
+  onPick,
+}: {
+  label: string;
+  path: string;
+  size: number;
+  empty: string;
+  loading: boolean;
+  accept: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onPick: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const name = fileName(path);
+  const url = path ? previewUrl(path) : "";
+  const thumb = path ? (
+    <a href={url} target="_blank" rel="noreferrer" className="g-attach-thumb" title="点击预览">
+      {IMAGE_SUFFIX_RE.test(path) ? (
+        <img src={url} alt={name} />
+      ) : (
+        <FileText size={24} style={{ color: "var(--accent)" }} />
+      )}
+    </a>
+  ) : (
+    <span className="g-attach-thumb is-empty">
+      <FileText size={24} />
+    </span>
+  );
+  const sizeText = fileSize(size);
+  return (
+    <div className="g-attach-tile">
+      {thumb}
+      <div className="g-attach-body">
+        <div className="g-attach-title">
+          <span className="t-label font-semibold" style={{ color: "var(--ink)" }}>
+            {label}
+          </span>
+          <Badge color={path ? "gray" : "orange"}>{path ? sizeText || "已上传" : "未上传"}</Badge>
+        </div>
+        <div className="g-attach-name" title={name || undefined}>
+          {name || empty}
+        </div>
+      </div>
+      <div className="g-attach-actions">
+        <SoftButton loading={loading} onClick={() => inputRef.current?.click()}>
+          <FileUp size={13} /> {path ? `更换${label}` : `上传${label}`}
+        </SoftButton>
+        {path && (
+          <GhostButton variant="plain" onClick={() => window.open(url, "_blank", "noreferrer")}>
+            <Eye size={13} /> 预览
+          </GhostButton>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept={accept} onChange={onPick} className="hidden" />
+    </div>
+  );
+}
+
 
 
 /* ------------------------------------------------------------------ */
@@ -124,10 +221,28 @@ export default function Config() {
     key_set: false,
     model: "",
   });
+  const [captcha, setCaptcha] = useState<Captcha>({ enabled: false, model: "" });
+  const [locate, setLocate] = useState<Locate>({ enabled: false, max_fields: 3, timeout: 15 });
+  const [vision, setVision] = useState<Vision>({
+    enabled: true,
+    model: "",
+    timeout: 40,
+    max_tiles: 4,
+    mask_sensitive: true,
+  });
+  const [auto, setAuto] = useState<Auto>({
+    handoff: "balanced",
+    upload_files: true,
+    learn_web: true,
+    learn_ai: true,
+  });
+  /** 网申资料两个视图：树形（默认，看来源与共指项）/ 表单（老样子，平铺着改）。 */
+  const [applyView, setApplyView] = useState("tree");
   const [savedAt, setSavedAt] = useState("");
 
   const [genKw, setGenKw] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [addingBlack, setAddingBlack] = useState(false);
   const [blackDraft, setBlackDraft] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -140,6 +255,7 @@ export default function Config() {
   }, [rt?.browser_background]);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const photoRef = useRef<HTMLInputElement | null>(null);
   const loaded = useRef(false);
 
   const markSaved = () => {
@@ -153,6 +269,10 @@ export default function Config() {
       setForm(toForm(b));
       setReply(toReply(b));
       setLlmForm(toLlmForm(b.llm));
+      setCaptcha(b.captcha);
+      setLocate(b.locate);
+      setVision(b.vision);
+      setAuto(b.auto);
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -192,6 +312,7 @@ export default function Config() {
         salary_max: next.salary_max,
         resume_path: next.resume_path,
         resume_text: next.resume_text,
+        photo_path: next.photo_path,
       });
       markSaved();
       if (withReload) void reload();
@@ -263,6 +384,24 @@ export default function Config() {
       toast.error((err as Error).message);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function onPickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoUploading(true);
+    try {
+      const res = await api.upload<{ photo_path: string }>("/api/config/photo/upload", file);
+      setForm((f) => (f ? { ...f, photo_path: res.photo_path } : f));
+      setBundle((b) => (b ? { ...b, photo_path: res.photo_path } : b));
+      toast.success("寸照已保存");
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setPhotoUploading(false);
     }
   }
 
@@ -399,6 +538,66 @@ export default function Config() {
     }
   }
 
+  async function saveCaptcha(patch: Partial<Captcha>) {
+    const next = { ...captcha, ...patch };
+    setCaptcha(next);
+    try {
+      const res = await api.put<Captcha>("/api/config/captcha", next);
+      setCaptcha(res);
+      setBundle((b) => (b ? { ...b, captcha: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  async function saveLocate(patch: Partial<Locate>) {
+    const next = { ...locate, ...patch };
+    setLocate(next);
+    try {
+      const res = await api.put<Locate>("/api/config/locate", next);
+      setLocate(res);
+      setBundle((b) => (b ? { ...b, locate: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  async function saveVision(patch: Partial<Vision>) {
+    const next = { ...vision, ...patch };
+    setVision(next);
+    try {
+      const res = await api.put<Vision>("/api/config/vision", next);
+      setVision(res);
+      setBundle((b) => (b ? { ...b, vision: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  async function saveAuto(patch: Partial<Auto>) {
+    const next = { ...auto, ...patch };
+    setAuto(next);
+    try {
+      const res = await api.put<Auto>("/api/config/auto", next);
+      setAuto(res);
+      setBundle((b) => (b ? { ...b, auto: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  const clearedLegacyModels = useRef(false);
+  useEffect(() => {
+    if (tab !== "system" || !bundle || clearedLegacyModels.current) return;
+    clearedLegacyModels.current = true;
+    if (captcha.model) void saveCaptcha({ model: "" });
+    if (vision.model) void saveVision({ model: "" });
+  }, [tab, bundle, captcha.model, vision.model]);
+
   /* ---- 网申资料 ---- */
 
   /** 只提交动过的键：后端按 patch 合并，补充字段传空值即删除。 */
@@ -410,6 +609,57 @@ export default function Config() {
     } catch (err) {
       toast.error((err as Error).message);
       void reload();
+    }
+  }
+
+  /** 忘掉本机学会的某一条字段（留空 key 表示整表清空）。 */
+  async function forgetLearned(key = "") {
+    try {
+      const path = key
+        ? `/api/config/apply-learned/${encodeURIComponent(key)}`
+        : "/api/config/apply-learned";
+      const res = await api.del<ApplyProfile>(path);
+      setBundle((b) => (b ? { ...b, apply_profile: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  /** 核对过一条 AI 推理：推得对的点「保留」，撤掉「待核对」。 */
+  async function confirmLearned(key: string) {
+    try {
+      const res = await api.post<ApplyProfile>("/api/config/apply-learned/confirm", { key });
+      setBundle((b) => (b ? { ...b, apply_profile: res } : b));
+      markSaved();
+      toast.success("已核对：这条以后算你自己认下的，不再标「待核对」");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  /** 认下一条同义叫法：「alias 其实就是 key 那条资料」。 */
+  async function mergeAlias(alias: string, key: string) {
+    try {
+      const res = await api.post<ApplyProfile>("/api/config/apply-alias", { alias, key });
+      setBundle((b) => (b ? { ...b, apply_profile: res } : b));
+      markSaved();
+      toast.success(`以后「${alias}」就按「${key}」这条资料填`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  /** 撤销一条手动合并。 */
+  async function unmergeAlias(alias: string) {
+    try {
+      const res = await api.del<ApplyProfile>(
+        `/api/config/apply-alias/${encodeURIComponent(alias)}`,
+      );
+      setBundle((b) => (b ? { ...b, apply_profile: res } : b));
+      markSaved();
+    } catch (err) {
+      toast.error((err as Error).message);
     }
   }
 
@@ -430,6 +680,16 @@ export default function Config() {
 
   const resumeReady = !!form?.resume_text.trim();
   const applyReady = !!bundle?.apply_profile.ready;
+  const applyLabels = bundle?.apply_profile.labels ?? {};
+  const applyValues = bundle?.apply_profile.values ?? {};
+  const applyGroups = bundle?.apply_profile.groups ?? [];
+  // 表单视图也要说清「这条不是资料里写的那份」：把树上的来源按字段键对过来，
+  // 否则本机学到 / 模型推的值和资料里手写的值长得一模一样，用户分不出哪条要核对。
+  const applyNodes = new Map<string, ApplyTreeNode>();
+  for (const group of bundle?.apply_profile.tree.groups ?? []) {
+    if (group.kind !== "group") continue;
+    for (const field of group.fields) applyNodes.set(field.key, field);
+  }
   const modelOptions =
     bundle && bundle.llm.model && !bundle.llm.models.includes(bundle.llm.model)
       ? [bundle.llm.model, ...bundle.llm.models]
@@ -756,26 +1016,27 @@ export default function Config() {
                       hint="上传你的简历，用于智能匹配岗位。支持 PDF / Word / 图片。"
                     />
                   </div>
-                  <div className="py-4">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <FileText size={16} style={{ color: form.resume_path ? "var(--accent)" : "var(--faint)" }} />
-                      <span className="t-label font-semibold" style={{ color: "var(--ink)" }}>
-                        {form.resume_path ? fileName(form.resume_path) : "尚未上传简历"}
-                      </span>
-                      <PrimaryButton loading={uploading} onClick={() => fileRef.current?.click()}>
-                        <FileUp size={13} /> 上传简历
-                      </PrimaryButton>
-                      <input
-                        ref={fileRef}
-                        type="file"
-                        accept={RESUME_ACCEPT}
-                        onChange={onPickResume}
-                        className="hidden"
-                      />
-                    </div>
-                    <p className="t-micro mt-3" style={{ color: "var(--faint)" }}>
-                      上传后会自动识别简历文字，也可以在下方的「简历内容」里直接粘贴或修改。
-                    </p>
+                  <div className="g-attach-grid py-4">
+                    <AttachRow
+                      label="简历"
+                      path={form.resume_path}
+                      size={form.resume_size}
+                      empty="尚未上传简历"
+                      loading={uploading}
+                      accept={RESUME_ACCEPT}
+                      inputRef={fileRef}
+                      onPick={onPickResume}
+                    />
+                    <AttachRow
+                      label="寸照"
+                      path={form.photo_path}
+                      size={form.photo_size}
+                      empty="尚未上传寸照"
+                      loading={photoUploading}
+                      accept=".jpg,.jpeg,.png,.bmp,.webp"
+                      inputRef={photoRef}
+                      onPick={onPickPhoto}
+                    />
                   </div>
                 </Card>
 
@@ -805,30 +1066,82 @@ export default function Config() {
             {/* ---------------- 网申资料 ---------------- */}
             {tab === "apply" && (
               <div className="g-in flex flex-col gap-5">
-                <Card pad="0.5rem 1.35rem">
-                  <div className="pt-3">
-                    <SectionTitle
-                      title="基本信息"
-                      hint="企业官网的网申表常问这些。填得越全，网申助手能替你填的字段越多；内容只存在本机，不会上传。"
-                    />
-                  </div>
-                  <div className="g-divided">
-                    <SetGrid cols="sm:grid-cols-2 lg:grid-cols-3">
-                      {Object.entries(bundle.apply_profile.labels)
-                        .filter(([key]) => key !== "self_intro")
-                        .map(([key, label]) => (
-                          <Field key={key} label={label}>
-                            <DelayInput
-                              value={bundle.apply_profile.values[key] ?? ""}
-                              onCommit={(v) => saveApplyProfile({ [key]: v })}
-                              width="100%"
-                              delay={600}
-                            />
-                          </Field>
-                        ))}
-                    </SetGrid>
-                  </div>
-                </Card>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Seg
+                    value={applyView}
+                    onChange={setApplyView}
+                    tabs={[
+                      { id: "tree", label: "树形", icon: <GitBranch size={13} /> },
+                      { id: "form", label: "表单", icon: <ClipboardList size={13} /> },
+                    ]}
+                  />
+                  <span className="t-micro" style={{ color: "var(--faint)" }}>
+                    {applyView === "form"
+                      ? "按分组逐项填；填得越全，网申助手能替你填的字段越多。"
+                      : "同一份资料的树形摆法：看每条打哪来、还认下过哪些叫法，别名可并、可撤。"}
+                  </span>
+                </div>
+
+                {applyView === "tree" ? (
+                  <ProfileTree
+                    tree={bundle.apply_profile.tree}
+                    onSave={saveApplyProfile}
+                    onConfirm={(key) => confirmLearned(key)}
+                    onForget={(key) => forgetLearned(key)}
+                    onMerge={(alias, key) => mergeAlias(alias, key)}
+                    onUnmerge={(alias) => unmergeAlias(alias)}
+                  />
+                ) : (
+                  <>
+                {applyGroups.map((group) => (
+                  <Card key={group.title} pad="0.5rem 1.35rem">
+                    <div className="pt-3">
+                      <SectionTitle
+                        title={group.title}
+                        hint={
+                          APPLY_GROUP_HINTS[group.title] ??
+                          "企业官网的网申表常问这些。填得越全，网申助手能替你填的字段越多；内容只存在本机，不会上传。"
+                        }
+                      />
+                    </div>
+                    <div className="g-divided">
+                      <SetGrid cols="sm:grid-cols-2 lg:grid-cols-3">
+                        {group.keys
+                          // 自我介绍在下面单独一张卡里编辑，这里别重复渲染；
+                          // 补充字段也不进分组（分组只装内置字段）
+                          .filter((key) => key !== "self_intro")
+                          .map((key) => (
+                            <Field
+                              key={key}
+                              label={
+                                <span className="inline-flex flex-wrap items-center gap-1.5">
+                                  {applyLabels[key] ?? key}
+                                  {applyNodes.get(key)?.memory && (
+                                    <Badge
+                                      color={
+                                        applyNodes.get(key)?.pending
+                                          ? "ink"
+                                          : sourceTone(applyNodes.get(key)?.source ?? "")
+                                      }
+                                    >
+                                      {applyNodes.get(key)?.pending ? "待核对" : "记忆"}
+                                    </Badge>
+                                  )}
+                                </span>
+                              }
+                            >
+                              <DelayInput
+                                value={applyValues[key] ?? ""}
+                                onCommit={(v) => saveApplyProfile({ [key]: v })}
+                                width="100%"
+                                delay={600}
+                              />
+                            </Field>
+                          ))}
+                      </SetGrid>
+                    </div>
+                  </Card>
+                ))}
 
                 <Card pad="0.5rem 1.35rem">
                   <div className="pt-3">
@@ -851,17 +1164,18 @@ export default function Config() {
                 <Card pad="0.5rem 1.35rem">
                   <div className="pt-3">
                     <SectionTitle
-                      title="补充字段"
-                      hint="官网表里还会问些别的，比如「作品集链接」「期望城市」「紧急联系人」。在这里按 名称 / 内容 自己补，网申助手会按名称去认。"
+                      title="本机学会的字段"
                     />
                   </div>
-                  <div className="py-4">
-                    <ExtraFields
-                      extra={bundle.apply_profile.extra}
-                      onSet={(name, value) => saveApplyProfile({ [`extra:${name}`]: value })}
-                    />
-                  </div>
+                  <LearnedFields
+                    rows={bundle.apply_profile.learned ?? []}
+                    onConfirm={(key) => confirmLearned(key)}
+                    onForget={(key) => forgetLearned(key)}
+                    onClear={() => forgetLearned()}
+                  />
                 </Card>
+                  </>
+                )}
               </div>
             )}
 
@@ -1167,15 +1481,147 @@ export default function Config() {
 
                 <Card pad="0.5rem 1.35rem">
                   <div className="pt-3">
-                    <SectionTitle title="浏览器" />
+                    <SectionTitle
+                      title="网申与浏览器"
+                      hint="填表口径、文件代传、手填学习，以及浏览器在后台怎么跑；企业官网的提交按钮永远留给你自己点。"
+                    />
                   </div>
                   <div className="g-divided">
+                    <Row
+                      inline
+                      label="交付口径"
+                      hint="决定哪些算「没填好」并交还给你：宽松只报必填空栏；中档连 AI 猜的也算待确认；严格连选填空栏也一并列出。"
+                    >
+                      <Dropdown
+                        value={HANDOFF_LABELS[auto.handoff] ?? "中档"}
+                        options={HANDOFF_OPTIONS}
+                        onChange={(v) => saveAuto({ handoff: HANDOFF_IDS[v] ?? "balanced" })}
+                        width={140}
+                      />
+                    </Row>
+                    <SwitchRow
+                      label="自动上传简历 / 寸照"
+                      hint="关掉后文件栏留空，等你在浏览器里自己选文件。"
+                      checked={auto.upload_files}
+                      onChange={(v) => saveAuto({ upload_files: v })}
+                    />
+                    <SwitchRow
+                      label="学习我在浏览器里手填的内容"
+                      hint="你在企业官网页面上自己补的那几栏，回读后记进本机资料库，换个官网再遇到直接有值可填。学进去的条目会先由 AI 判一遍有没有效、并把同义叫法归并成一条。关掉只填不学。"
+                      checked={auto.learn_web}
+                      onChange={(v) => saveAuto({ learn_web: v })}
+                    />
+                    <SwitchRow
+                      label="把认可的 AI 推算记进资料库"
+                      hint="网申面板上「AI 推理」那一栏你留着没删的，点「填入浏览器」后就存进本机资料库，换个官网再遇到同类栏目直接有值。关掉只填不记。"
+                      checked={auto.learn_ai}
+                      onChange={(v) => saveAuto({ learn_ai: v })}
+                    />
                     <SwitchRow
                       label="后台静默运行"
                       hint="浏览器窗口移出屏幕，不打扰工作；需要时用顶栏「查看浏览器」调出。"
                       checked={background}
                       onChange={toggleBackground}
                     />
+                  </div>
+                </Card>
+
+                <Card pad="0.5rem 1.35rem">
+                  <div className="pt-3">
+                    <SectionTitle
+                      title="AI 识图与核对"
+                      hint="验证码、认不出的栏位、扫描清单和页面对不上时，交给多模态模型处理；需要先开通大模型服务，且模型支持读图。"
+                    />
+                  </div>
+                  <div className="g-divided">
+                    <div>
+                      <SwitchRow
+                        label="AI 自动识别验证码"
+                        hint="使用「大模型服务」里选中的模型，模型需支持读图。"
+                        checked={captcha.enabled}
+                        onChange={(v) => saveCaptcha({ enabled: v })}
+                      />
+                    </div>
+
+                    <div>
+                      <SwitchRow
+                        label="开启截图定位"
+                        hint="截图会发给你配置的模型服务，画面里可能有个人资料，确认后再开。"
+                        checked={locate.enabled}
+                        onChange={(v) => saveLocate({ enabled: v })}
+                      />
+                      <Row
+                        inline
+                        label="护栏"
+                        hint="认不出的栏位一律标「请手动填写」，不会硬塞一个猜的值。"
+                      >
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <span className="t-micro" style={{ color: "var(--faint)" }}>
+                            单次上限
+                          </span>
+                          <NumInput
+                            value={locate.max_fields}
+                            onCommit={(v) => saveLocate({ max_fields: v })}
+                            width={72}
+                            min={1}
+                            max={10}
+                          />
+                          <span className="t-micro" style={{ color: "var(--faint)" }}>
+                            超时（秒）
+                          </span>
+                          <NumInput
+                            value={locate.timeout}
+                            onCommit={(v) => saveLocate({ timeout: v })}
+                            width={72}
+                            min={5}
+                            max={60}
+                          />
+                        </div>
+                      </Row>
+                    </div>
+
+                    <div>
+                      <SwitchRow
+                        label="开启视觉核对"
+                        hint="只补对照表的行，不会替你点页面上的任何东西；截图会发给你配置的模型服务。"
+                        checked={vision.enabled}
+                        onChange={(v) => saveVision({ enabled: v })}
+                      />
+                      <SwitchRow
+                        label="给已填内容打码"
+                        hint="登录后的招聘系统常把姓名、手机号预填在表里，涂黑之后再截图。"
+                        checked={vision.mask_sensitive}
+                        onChange={(v) => saveVision({ mask_sensitive: v })}
+                      />
+                      <Row
+                        inline
+                        label="护栏"
+                        hint="超时或模型说不清楚就沿用普通扫描的结果，不会卡住流程。"
+                      >
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <span className="t-micro" style={{ color: "var(--faint)" }}>
+                            超时（秒）
+                          </span>
+                          <NumInput
+                            value={vision.timeout}
+                            onCommit={(v) => saveVision({ timeout: v })}
+                            width={72}
+                            min={5}
+                            max={120}
+                          />
+                          <span className="t-micro" style={{ color: "var(--faint)" }}>
+                            最多分片
+                          </span>
+                          <NumInput
+                            value={vision.max_tiles}
+                            onCommit={(v) => saveVision({ max_tiles: v })}
+                            width={72}
+                            min={1}
+                            max={12}
+                          />
+                        </div>
+                      </Row>
+                    </div>
                   </div>
                 </Card>
               </div>
@@ -1204,60 +1650,125 @@ async function saveTailor(
   }
 }
 
-/** 补充字段编辑器：已添加的逐行改名 / 改值 / 删除，下方一行用来新增。 */
-function ExtraFields({
-  extra,
-  onSet,
+/** 分组说明：按分组标题给一句人话，认不出的分组退回通用说明。 */
+const APPLY_GROUP_HINTS: Record<string, string> = {
+  基本信息: "企业官网的网申表常问这些；内容只存在本机，不会上传。",
+  联系方式: "网申表里的手机号、邮箱、地址等栏目会填这里。",
+  教育背景: "校招与登记表里的学历、成绩、证书信息。",
+  求职意向: "期望薪资、到岗时间、实习安排这类意向信息。",
+  经历与能力: "工作、实习、项目与技能的长文本，会整段填进对应栏。",
+  紧急联系人: "部分企业的登记表要求填写紧急联系人。",
+  其他信息: "内推码、作品集链接等零散信息。",
+};
+
+/** 本机学会的字段：只读展示 + 单条删除 / 整表清空（内容来自各个官网的手工补填）。 */
+/** 一条学会的字段。手填的、模型推的分开摆，来源徽章与树形视图同一口径。 */
+function LearnedRow({
+  row,
+  onConfirm,
+  onForget,
 }: {
-  extra: Record<string, string>;
-  /** 传空值即删除该字段（后端按 patch 合并）。 */
-  onSet: (name: string, value: string) => void;
+  row: ApplyLearnedRow;
+  onConfirm?: (key: string) => void;
+  onForget: (key: string) => void;
 }) {
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const rows = Object.entries(extra);
-
-  function add() {
-    const key = name.trim();
-    if (!key) {
-      toast.error("请先填字段名称");
-      return;
-    }
-    onSet(key, value.trim());
-    setName("");
-    setValue("");
-  }
-
+  const shown = row.value;
   return (
-    <div className="flex flex-col gap-4">
-      {rows.length > 0 && (
-        <div className="g-divided-soft">
-          {rows.map(([key, val]) => (
-            <div key={key} className="flex flex-wrap items-center gap-3 py-3">
-              <span
-                className="t-label w-40 shrink-0 truncate font-semibold"
-                style={{ color: "var(--ink)" }}
-                title={key}
-              >
-                {key}
-              </span>
-              <div className="min-w-[220px] flex-1">
-                <DelayInput value={val} onCommit={(v) => onSet(key, v)} width="100%" />
-              </div>
-              <GhostButton danger onClick={() => onSet(key, "")}>
-                <Trash2 size={13} /> 删除
-              </GhostButton>
-            </div>
-          ))}
+    <div className="g-learned-row">
+      {/* 左边一栏：栏目名一行、内容一行、依据一行，都齐着左边起头 */}
+      <div className="g-learned-main">
+        <div className="g-learned-head">
+          <span className="g-learned-label" title={row.label}>
+            {row.label}
+          </span>
+          <Badge color={sourceTone(row.source)}>{row.source}</Badge>
+          {row.domain && <Badge color="gray">{row.domain}</Badge>}
+          {row.updated_at && (
+            <span className="g-learned-time" title={row.updated_at}>
+              {row.updated_at}
+            </span>
+          )}
         </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2.5">
-        <TextInput value={name} onChange={setName} placeholder="字段名称，如「作品集链接」" width={200} />
-        <TextInput value={value} onChange={setValue} placeholder="要填的内容" width={260} />
-        <PrimaryButton onClick={add}>
-          <Plus size={13} /> 添加
-        </PrimaryButton>
+        <p className="g-learned-value" title={shown}>
+          {shown}
+        </p>
+        {row.basis && <p className="g-learned-basis">依据：{row.basis}</p>}
+      </div>
+      {/* 右边一栏：两个动作竖着排，永远贴着右边缘，不跟内容抢地方 */}
+      <div className="g-learned-side">
+        {onConfirm && (
+          <SoftButton onClick={() => onConfirm(row.key)}>
+            <Check size={13} /> 推得对，保留
+          </SoftButton>
+        )}
+        <GhostButton danger onClick={() => onForget(row.key)}>
+          <Trash2 size={13} /> 忘掉
+        </GhostButton>
       </div>
     </div>
   );
 }
+
+function LearnedFields({
+  rows,
+  onConfirm,
+  onForget,
+  onClear,
+}: {
+  rows: ApplyLearnedRow[];
+  onConfirm: (key: string) => void;
+  onForget: (key: string) => void;
+  onClear: () => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="py-4 t-micro" style={{ color: "var(--faint)" }}>
+        还没学到新字段。网申时手工补了资料库里没有的栏目，这里就会自动多出一条。
+      </div>
+    );
+  }
+  // 和树形视图一样分成两块：手填学到的、以及模型推出来等着核对的
+  const manual = rows.filter((row) => row.source !== "AI推算");
+  const inferred = rows.filter((row) => row.source === "AI推算");
+  return (
+    <div className="py-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="t-micro" style={{ color: "var(--faint)" }}>
+          共 {rows.length} 条，换个官网再遇到同名列时会自动带上。
+        </span>
+        <GhostButton danger onClick={onClear}>
+          <Trash2 size={13} /> 全部清空
+        </GhostButton>
+      </div>
+
+      {manual.length > 0 && (
+        <div className="g-divided-soft">
+          {manual.map((row) => (
+            <LearnedRow key={row.key} row={row} onForget={onForget} />
+          ))}
+        </div>
+      )}
+
+      {inferred.length > 0 && (
+        <div className="mt-5">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="t-label font-semibold" style={{ color: "var(--ink)" }}>
+              AI 推理（待核对）
+            </span>
+            <Badge color="ink">待核对</Badge>
+            <span className="t-micro" style={{ color: "var(--faint)" }}>
+              模型按已有资料推出来的。核对办法：看「依据」——推得对就点「推得对，保留」，
+              推错了就点「忘掉」；留着的会随网申面板的「填入浏览器」一起入库。
+            </span>
+          </div>
+          <div className="g-divided-soft">
+            {inferred.map((row) => (
+              <LearnedRow key={row.key} row={row} onConfirm={onConfirm} onForget={onForget} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

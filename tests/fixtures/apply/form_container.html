@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  夹具：没有真 label，靠「只装一个控件的容器文字」认标签（<div><span>姓名</span><input></div>）。
+  公司、岗位、选项都是编造的样例数据，不含任何真实个人信息。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>社会招聘 - 云栖数据</title>
+  </head>
+  <body>
+    <h1>社会招聘申请表</h1>
+    <form class="apply-form" action="/apply" method="post">
+      <div class="field"><span>姓名</span><input name="applyName" type="text" /></div>
+      <div class="field"><span>手机号</span><input name="contactMobile" type="text" /></div>
+      <div class="field"><span>邮箱</span><input name="contactMail" type="text" /></div>
+      <div class="field"><span>微信号</span><input name="im" type="text" /></div>
+      <div class="field"><span>现居城市</span><input name="liveCity" type="text" /></div>
+      <div class="field"><span>期望薪资</span><input name="expect" type="text" /></div>
+      <div class="field"><span>到岗时间</span><input name="joinTime" type="text" /></div>
+      <button type="submit">提交申请</button>
+    </form>
+  </body>
+</html>

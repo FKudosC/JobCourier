@@ -14,12 +14,10 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from job.paths import USER_DATA_DIR
+from job.utils import ocr
 
 # 支持的图片扩展名（OCR）
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
-
-# OCR 引擎懒加载缓存（首次调用约 1-2 秒加载模型）
-_ocr_engine = None
 
 
 class ResumePdf:
@@ -28,11 +26,22 @@ class ResumePdf:
     # 简历存放目录
     DIR = USER_DATA_DIR / "resumes"
 
+    # 生活照存放目录
+    PHOTO_DIR = USER_DATA_DIR / "photos"
+
     @classmethod
     def save(cls, filename: str, data: bytes) -> Path:
         """把上传的简历存到 ``DIR``（同名覆盖），返回本地路径。"""
         cls.DIR.mkdir(parents=True, exist_ok=True)
         path = cls.DIR / Path(filename).name
+        path.write_bytes(data)
+        return path
+
+    @classmethod
+    def save_photo(cls, filename: str, data: bytes) -> Path:
+        """把上传的生活照存到 ``PHOTO_DIR``（同名覆盖），返回本地路径。"""
+        cls.PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        path = cls.PHOTO_DIR / Path(filename).name
         path.write_bytes(data)
         return path
 
@@ -85,23 +94,9 @@ def _from_docx(data: bytes) -> str:
 
 def _from_image(data: bytes) -> str:
     """图片 OCR：RapidOCR 本地推理，行按纵坐标排序后拼接。"""
-    global _ocr_engine
-    try:
-        from rapidocr_onnxruntime import RapidOCR
-    except ImportError as exc:  # pragma: no cover - 依赖已随包安装
-        raise ValueError("图片识别组件未安装：请在项目目录运行 uv add rapidocr-onnxruntime") from exc
-    if _ocr_engine is None:
-        _ocr_engine = RapidOCR()
-    try:
-        result, _elapsed = _ocr_engine(data)
-    except Exception as exc:
-        raise ValueError("图片无法识别，请确认是清晰的简历截图或照片") from exc
-    if not result:
+    rows = ocr.lines(data)
+    if not rows:
         return ""
-    # [四点坐标, 文字, 置信度]：按行的纵坐标排序，再按横坐标拼行
-    def _sort_key(line):
-        box = line[0]
-        return (min(p[1] for p in box), min(p[0] for p in box))
-
-    lines = sorted(result, key=_sort_key)
-    return _clean("\n".join(str(line[1]) for line in lines if len(line) > 1 and line[1]))
+    # 按行的纵坐标排序，同一行的再按横坐标从左到右
+    ordered = sorted(rows, key=lambda row: (row[2], row[3]))
+    return _clean("\n".join(text for text, _score, _top, _left in ordered))

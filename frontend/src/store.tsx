@@ -90,6 +90,7 @@ export function RuntimeProvider({ children }: { children: React.ReactNode }) {
           setLogs([]);
         } else if (
           msg.type === "analyze_done" ||
+          msg.type === "apply_done" ||
           msg.type === "company_step" ||
           msg.type === "company_done" ||
           msg.type === "company_batch_done"

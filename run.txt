@@ -1,10 +1,17 @@
 小投 · JobCourier 运行说明
 ==========================
 
+便携版（如果拿到的是 JobCourier-portable-win64.zip）
+  - 解压整个文件夹，双击「启动小投.cmd」，不需要 Python / Node / uv
+  - 需要本机安装 Google Chrome（自动投递与网申使用）
+  - 想后台跑：双击「后台启动小投.cmd」
+  - 数据仍在 user_data/，日志在 user_data/logs/backend.log
+
+
 环境要求（只需装一次）
-  - Python 3.12，用 uv 管理：https://docs.astral.sh/uv/
-  - Node.js（自带 npm）
-  - Google Chrome（自动投递通过本机 Chrome 完成）
+  - Python 3.12 及以上，用 uv 管理
+  - Node.js 22+（自带 npm）
+  - Google Chrome（自动投递和网申都通过本机 Chrome 完成）
 
 
 首次启动（两行）
@@ -17,7 +24,9 @@
      uv sync            -> 安装后端依赖，生成 .venv
      npm ci             -> 安装前端依赖
      npm run build      -> 构建前端到 frontend/dist/
-     然后启动服务，并在就绪后自动打开浏览器。
+     然后启动服务，就绪后自动打开 http://127.0.0.1:8000
+
+  首次要装依赖、构建前端，可能等几分钟；之后再启动通常几秒。
 
 
 以后每次启动
@@ -26,6 +35,18 @@
 
   一条命令版：
        cd <项目目录>; .\start-jobcourier.cmd
+
+
+后台启动（可选，不占命令行窗口）
+  双击 start-jobcourier-background.cmd，或在项目目录执行：
+       .\start-jobcourier-background.cmd
+  - 隐藏启动，不留下任何窗口，也不打断你手头的事
+  - 启动后会打印 PID，停止时直接执行：
+       Stop-Process -Id <PID>
+  - 日志固定写到 user_data/logs/backend.log
+  - 面板地址还是 http://127.0.0.1:8000
+  - 记不住 PID 时，按命令行查找并结束：
+       Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like "*main.py*" } | ForEach-Object { Stop-Process -Id $_.ProcessId }
 
 
 手动分步启动（可选，方便排查）
@@ -38,32 +59,36 @@
        uv run python -m job
 
 
-后台启动（可选，不占命令行窗口）
-   在 PowerShell 里执行这一条，启动后不会留下任何窗口：
-       $env:PYTHONUTF8="1"; Start-Process .\.venv\Scripts\pythonw.exe -ArgumentList "main.py" -WorkingDirectory $PWD -WindowStyle Hidden
-   - 用的是 pythonw（不带控制台），日志自动写到 user_data/logs/backend.log
-   - 停止：任务管理器里结束 pythonw.exe，或执行
-       Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like "*main.py*" } | ForEach-Object { Stop-Process -Id $_.ProcessId }
-
-
 访问与停止
   - 浏览器访问：http://127.0.0.1:8000   （前后端同源，只有这一个端口）
   - 就绪自检：curl http://127.0.0.1:8000/ping   返回 {"ok":true} 即正常
-  - 停止：在运行窗口按 Ctrl+C
+  - 停止：前台运行时按 Ctrl+C；后台运行用上面的 PID 命令
 
 
 数据存放
-  - 运行期数据都在 user_data/：数据库 job-courier.db、简历 resumes/、
-    Chrome 登录态 chrome-profile/、日志 logs/。
+  - 运行期数据都在 user_data/：
+      job-courier.db   岗位、聊天、网申任务与「网申资料」
+      resumes/         上传的简历原件，custom/ 是自动生成的定制简历
+      photos/          寸照与生活照
+      chrome-profile/  BOSS 与官网的 Chrome 登录态
+      logs/            后端日志
     首次运行自动生成，已被 .gitignore 排除，不会提交到仓库。
-  - 网申任务与「网申资料」（姓名、手机号、邮箱等）也写在 job-courier.db 里，
-    同样只存本机，不会上传到任何服务器。
+  - 以上内容只存本机，不会上传到任何服务器。
   - 想换位置（例如同步盘）：启动前设置环境变量 JOB_COURIER_DATA_DIR 指向目标目录。
 
 
+使用要点
+  - 先到「配置中心 → 系统设置 → 大模型服务」填接口地址、API Key，拉取模型并测试连接；不配也能手动投递，但 AI 筛选、简历匹配与网申补全会停用。
+  - 浏览器默认在屏幕外运行；需要看页面时点顶栏「查看浏览器」，看完可以点「关闭浏览器」让它彻底退出，或者继续后台跑。
+  - 网申助手只负责填表，企业官网的提交按钮永远留给你自己点。
+  - 第一遍没填上的栏位，AI 会接着在浏览器里补全；仍然填不了的，回面板点「学习手填内容」，把手工补的内容记进本机资料库。
+
+
 常见问题
-  - 提示找不到 uv：先安装 https://docs.astral.sh/uv/
-  - 提示 npm 不是命令：先安装 Node.js
-  - 打开后长时间显示"正在启动"：首次要构建前端，等 1 分钟左右；
+  - 提示找不到 uv：先安装 uv 后重开终端
+  - 提示 npm 不是命令：先安装 Node.js 22+
+  - 打开后长时间显示「小投正在启动」：首次要构建前端，等几分钟；
     仍不行请查看 user_data/logs/backend.log
-  - 改了前端界面代码后不生效：先执行 npm run build 再重启服务
+  - 8000 端口被占用：先停掉旧的 python.exe 进程，再重新启动
+  - 浏览器没有自动弹出：手动打开 http://127.0.0.1:8000；需要看自动化窗口时点顶栏「查看浏览器」
+  - 改了前端界面代码后不生效：先在 frontend 目录执行 npm run build，再重启服务

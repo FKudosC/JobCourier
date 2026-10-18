@@ -1,4 +1,4 @@
-/** 网申助手：BOSS 上没有 HR 的岗位，去企业官网的表单里补一份。 */
+/** 网申助手：把企业官网的投递表单扫成对照表、按「网申资料」代填，提交始终留给用户。 */
 
 import {
   CheckCircle2,
@@ -6,12 +6,17 @@ import {
   FileInput,
   Plus,
   RefreshCw,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../api";
-import { ApplyDialog, type ApplyTask, statusTone } from "../components/ApplyDialog";
+import {
+  ApplyDialog,
+  type ApplyTask,
+  statusTone,
+} from "../components/ApplyDialog";
 import { PageShell } from "../Shell";
 import {
   Badge,
@@ -34,6 +39,17 @@ const STATUS_FILTERS: Record<string, string> = {
   已提交: "submitted",
   需人工: "failed",
 };
+
+/** 这条任务还差几项（交付清单三堆之和）。 */
+function handoffCount(task: ApplyTask): number {
+  const handoff = task.handoff;
+  if (!handoff) return 0;
+  return (
+    (handoff.gaps?.length ?? 0) +
+    (handoff.manual?.length ?? 0) +
+    (handoff.unsure?.length ?? 0)
+  );
+}
 
 export default function Apply() {
   const [tasks, setTasks] = useState<ApplyTask[]>([]);
@@ -67,6 +83,19 @@ export default function Apply() {
     try {
       await api.post(`/api/apply/task/${encodeURIComponent(task.uid)}/submit`);
       toast.success("已记为已提交");
+      void load();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function reopen(task: ApplyTask) {
+    setBusy(task.uid);
+    try {
+      await api.post(`/api/apply/task/${encodeURIComponent(task.uid)}/reopen`);
+      toast.success("已撤销提交，可以接着改");
       void load();
     } catch (err) {
       toast.error((err as Error).message);
@@ -161,6 +190,9 @@ export default function Apply() {
 
                 <div className="flex shrink-0 items-center gap-2">
                   <Badge color={statusTone(task.status)}>{task.statusLabel}</Badge>
+                  {handoffCount(task) > 0 && (
+                    <Badge color="orange">还差 {handoffCount(task)} 项</Badge>
+                  )}
                   {task.note && (
                     <span
                       className="t-micro hidden max-w-[18ch] truncate lg:inline"
@@ -176,13 +208,23 @@ export default function Apply() {
                   <SoftButton onClick={() => setDraft({ uid: task.uid, url: "" })}>
                     <FileInput size={13} /> 填表
                   </SoftButton>
-                  <GhostButton
-                    disabled={busy === task.uid || task.status === "submitted"}
-                    title="在浏览器里提交完之后，回来点这里记一笔"
-                    onClick={() => submit(task)}
-                  >
-                    <CheckCircle2 size={13} /> 已提交
-                  </GhostButton>
+                  {task.status === "submitted" ? (
+                    <GhostButton
+                      disabled={busy === task.uid}
+                      title="点错了？退回上一步，可以接着填或重新提交"
+                      onClick={() => reopen(task)}
+                    >
+                      <RotateCcw size={13} /> 撤销提交
+                    </GhostButton>
+                  ) : (
+                    <GhostButton
+                      disabled={busy === task.uid}
+                      title="在浏览器里提交完之后，回来点这里记一笔"
+                      onClick={() => submit(task)}
+                    >
+                      <CheckCircle2 size={13} /> 已提交
+                    </GhostButton>
+                  )}
                   {task.url && (
                     <GhostButton
                       title="在浏览器里打开这个网申页"

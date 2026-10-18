@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  夹具：webuploader 式上传栏——真正的 input[type=file] 被 CSS 藏起来（display:none），
+  界面上只露一个「选择文件」按钮。公司、岗位都是编造的样例数据。
+  期望：隐藏的 file 控件仍然要扫得到（按所在行的标签认领成 resume / photo），
+  填表时把文件真喂进那个藏起来的控件。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>应聘登记 - 澜石智造</title>
+  </head>
+  <body>
+    <h1>应聘登记表</h1>
+    <form action="/apply" method="post">
+      <table class="form-table">
+        <tr>
+          <td class="lab">姓名</td>
+          <td><input name="shName" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">简历上传</td>
+          <td>
+            <div class="uploader">
+              <span class="picked">未选择文件</span>
+              <input id="Resume_File" name="Resume_File" type="file" style="display: none" />
+              <button type="button">选择文件</button>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="lab">生活照上传</td>
+          <td>
+            <div class="uploader">
+              <span class="picked">未选择文件</span>
+              <input id="Photo_File" name="Photo_File" type="file" style="display: none" />
+              <button type="button">选择文件</button>
+            </div>
+          </td>
+        </tr>
+      </table>
+      <button type="submit">提交</button>
+    </form>
+  </body>
+</html>

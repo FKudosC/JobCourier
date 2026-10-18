@@ -1225,6 +1225,500 @@ input.t-num {
   animation: g-spin 0.8s linear infinite;
 }
 
+/* 简历 / 寸照附件位：一张小卡片，缩略图 + 名称 / 大小 + 上传 / 预览 */
+.g-attach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.85rem;
+}
+
+.g-attach-tile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.95rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--sheet-2);
+  transition:
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+
+.g-attach-tile:hover {
+  border-color: var(--line-2);
+  box-shadow: var(--sh-1);
+}
+
+.g-attach-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.g-attach-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.g-attach-name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.g-attach-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  /* 贴着卡片右缘，不再挤在文件名底下 */
+  margin-left: auto;
+  gap: 0.4rem;
+}
+
+.g-attach-thumb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--soft);
+  overflow: hidden;
+}
+
+.g-attach-thumb.is-empty {
+  color: var(--faint);
+  border-style: dashed;
+  background: transparent;
+}
+
+.g-attach-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 「本机学会 / AI 推理」里的一条：左边内容一栏，右边动作一栏，各归各的。
+   原来是全塞进一行 flex，栏名、值、徽章、时间、按钮挤在一起，窄屏就散架。 */
+.g-learned-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem 0;
+}
+
+.g-learned-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.g-learned-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.g-learned-label {
+  flex: none;
+  max-width: 14rem;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.g-learned-time {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.g-learned-value {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.g-learned-basis {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.g-learned-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+/* ============================================================
+   信息树：类别是树枝，字段是叶子
+
+   树干从「个人信息库」往下走，一个分组岔出一根树枝，字段挂在枝上：
+   左侧竖线是树干 / 子枝，短横线是接口，越靠右的一层往前浮一档
+   （translateZ 分档），整棵树再随指针绕 Y 轴偏一点点。
+   为让 translateZ 真的生效，中间几层都开着 preserve-3d。
+   ============================================================ */
+
+/* 透视不挂在容器上，而是写进每个元素自己的 transform（perspective()）。
+   整棵树几百行高，共用一个消失点会让离消失点远的那几行整体错位、互相压住。 */
+.g-tree3d-stage {
+  position: relative;
+  padding: 2px 8px 8px 0;
+}
+
+/* 树根：这一库资料的总入口 */
+.g-tree3d-base {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.95rem 0.5rem 0.8rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent-line);
+  background: linear-gradient(180deg, var(--accent-soft), transparent);
+  box-shadow: var(--sh-1);
+  /* 一律向右后退（正 yaw）：投影只会缩小，不会把整块撑出容器、多出一条横向滚动条 */
+  transform: perspective(760px) rotateY(var(--yaw, 7deg)) translateZ(26px);
+}
+
+.g-tree3d-base::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 32% 30%, var(--accent-hi), var(--accent-deep));
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+/* 树干 */
+.g-tree3d-root {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 12px 0 4px 44px;
+}
+
+.g-tree3d-root::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: -6px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent-line), var(--accent-tint) 70%, transparent);
+}
+
+.g-tree3d-branch {
+  position: relative;
+  padding: 5px 0;
+}
+
+/* 树干到树枝的接口：斜着长出去，才像树枝而不是表格线 */
+.g-tree3d-branch::before {
+  content: "";
+  position: absolute;
+  left: -31px;
+  top: 26px;
+  width: 31px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-line), var(--line-2));
+  transform: rotate(-13deg);
+  transform-origin: 0 50%;
+}
+
+/* 树枝节点：一个分组 */
+.g-tree3d-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-2);
+  background: var(--sheet);
+  box-shadow: var(--sh-1);
+  cursor: pointer;
+  transform: perspective(760px) rotateY(var(--yaw, 7deg)) translateZ(20px);
+  transition:
+    transform 0.24s var(--ease),
+    box-shadow 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.g-tree3d-node:hover {
+  transform: perspective(760px) rotateY(var(--yaw, 7deg)) translateZ(40px);
+  box-shadow: var(--sh-2);
+  border-color: var(--accent-line);
+}
+
+.g-tree3d-branch.is-open > .g-tree3d-node {
+  background: var(--sheet-2);
+  border-color: var(--accent-line);
+}
+
+.g-tree3d-branch.is-inferred > .g-tree3d-node {
+  border-color: var(--warn-line);
+  background: linear-gradient(180deg, var(--warn-soft), transparent);
+}
+
+.g-tree3d-node-caret {
+  display: inline-flex;
+  color: var(--faint);
+}
+
+/* 叶子那一层：子枝 + 接口 */
+.g-tree3d-leaves {
+  position: relative;
+  list-style: none;
+  margin: 6px 0 2px 20px;
+  padding: 4px 0 4px 30px;
+}
+
+.g-tree3d-leaves::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 2px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--line-2), transparent);
+}
+
+.g-tree3d-leaf {
+  position: relative;
+  padding: 3px 0;
+}
+
+.g-tree3d-leaf::before {
+  content: "";
+  position: absolute;
+  left: -21px;
+  top: 21px;
+  width: 21px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line-2);
+  transform: rotate(-12deg);
+  transform-origin: 0 50%;
+}
+
+/* 一片叶子：一条字段资料。收着不铺满整行，树的轮廓才看得出来 */
+.g-tree3d-chip {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 34rem);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--sheet);
+  box-shadow: var(--sh-1);
+  overflow: hidden;
+  transform: perspective(760px) rotateY(var(--yaw, 7deg)) translateZ(28px);
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease),
+    border-color 0.22s var(--ease);
+}
+
+.g-tree3d-chip:hover {
+  transform: perspective(760px) rotateY(var(--yaw, 7deg)) translateZ(52px);
+  box-shadow: var(--sh-2);
+}
+
+/* 展开后必须正着放：倾斜的卡片里塞编辑器，字是歪的、控件也是歪的。
+   收起态保留那点 3D 厚度就够了。 */
+.g-tree3d-chip.is-open {
+  transform: none;
+  width: min(100%, 42rem);
+  border-color: var(--accent-line);
+  box-shadow: var(--sh-3);
+}
+
+.g-tree3d-chip.is-open:hover {
+  transform: none;
+}
+
+.g-tree3d-chip-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.8rem;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.g-tree3d-leaf-mark {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--faint);
+  box-shadow: 0 0 0 3px var(--soft);
+}
+
+.g-tree3d-leaf-mark[data-tone="green"] {
+  background: var(--good);
+  box-shadow: 0 0 0 3px var(--good-soft);
+}
+
+.g-tree3d-leaf-mark[data-tone="blue"] {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.g-tree3d-leaf-mark[data-tone="teal"] {
+  background: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-soft);
+}
+
+.g-tree3d-leaf-mark[data-tone="ink"] {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+.g-tree3d-chip-label {
+  flex: none;
+  max-width: 13rem;
+}
+
+.g-tree3d-chip-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.g-tree3d-chip-caret {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+}
+
+/* 叶子展开后的编辑区：左边一列小标题、右边一列内容，每行都齐着排。
+   原来是「值铺满 → 依据 → 右下角挤一串域名/时间/删除」，左一块右一块看着散。 */
+.g-tree3d-editor {
+  display: grid;
+  grid-template-columns: 2.9rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.55rem 0.7rem;
+  padding: 0.85rem 0.95rem 0.9rem;
+  border-top: 1px solid var(--line);
+  background: var(--sheet-2);
+}
+
+.g-tree3d-term {
+  padding-top: 0.34rem;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-align: right;
+}
+
+.g-tree3d-value {
+  min-width: 0;
+}
+
+/* 只读的那几条（本机学会 / AI 推算）：做成一块安静的文本框，长内容也不会撑破 */
+.g-tree3d-read {
+  margin: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.g-tree3d-note-body {
+  margin: 0;
+  padding-top: 0.28rem;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.g-tree3d-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding-top: 0.28rem;
+}
+
+/* 删掉这条 / 并到别的字段：贴着左边标题栏起头，不往右下角跑 */
+.g-tree3d-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.15rem;
+}
+
+.g-tree3d-note {
+  margin: 2px 0 4px;
+  color: var(--muted);
+}
+
+/* 树枝进度条：已填几项一眼看到，不用去数 */
+.g-tree3d-meter {
+  position: relative;
+  display: block;
+  width: 76px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--soft);
+  overflow: hidden;
+}
+
+.g-tree3d-meter::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--pct, 0%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+  transition: width 0.4s var(--ease);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

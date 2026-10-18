@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  夹具：组件库控件（假下拉 / 级联 / 日期 / 拖拽上传）。这些控件的值都藏在 input 里，
+  选项要展开浮层才出现，直接 fill() 只会写进一个假值——正是网申填不对的根因。
+  标签仍走「只装一个控件的容器文字」那一档。公司、岗位、选项都是编造的样例数据。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>校园招聘 - 星野科技</title>
+    <style>
+      body { font-family: sans-serif; }
+      .field { margin: 10px 0; }
+      input { width: 220px; height: 30px; }
+      .drop { width: 260px; height: 90px; border: 1px dashed #bbb; }
+    </style>
+  </head>
+  <body>
+    <h1>校园招聘申请表</h1>
+    <form class="apply-form" action="/apply" method="post">
+      <div class="field">
+        <span>现居城市</span>
+        <div class="ant-select">
+          <input
+            class="ant-select-selection-search"
+            name="liveCity"
+            type="text"
+            role="combobox"
+            aria-haspopup="listbox"
+          />
+        </div>
+      </div>
+      <div class="field">
+        <span>户籍所在地</span>
+        <div class="ant-cascader">
+          <input class="ant-cascader-input" name="hukouArea" type="text" readonly />
+        </div>
+      </div>
+      <div class="field">
+        <span>出生年月</span>
+        <div class="ant-picker">
+          <input class="ant-picker-input" name="birthday" type="text" />
+        </div>
+      </div>
+      <div class="field">
+        <span>附件简历</span>
+        <div class="drop">
+          <input class="drop-file" name="resumeFile" type="file" style="display: none" />
+        </div>
+      </div>
+      <button type="submit">提交申请</button>
+    </form>
+  </body>
+</html>

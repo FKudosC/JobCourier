@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  夹具：表格布局，标签在左边那一格（含文件上传的「浏览…」按钮写法）。
+  公司、岗位、选项都是编造的样例数据，不含任何真实个人信息。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>人才招聘 - 青禾智造</title>
+  </head>
+  <body>
+    <h1>应聘登记表</h1>
+    <form action="/apply" method="post">
+      <table class="form-table">
+        <tr>
+          <td class="lab">姓名</td>
+          <td><input name="tblName" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">出生年月</td>
+          <td><input name="tblBirth" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">通讯地址</td>
+          <td><input name="tblAddress" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">最高学历</td>
+          <td>
+            <select name="tblDegree">
+              <option value="">请选择</option>
+              <option>大专</option>
+              <option>本科</option>
+              <option>硕士</option>
+            </select>
+          </td>
+        </tr>
+        <tr>
+          <td class="lab">附件简历</td>
+          <td><span class="upload">浏览…<input type="file" name="tblResume" /></span></td>
+        </tr>
+      </table>
+      <button type="submit">提交</button>
+    </form>
+  </body>
+</html>

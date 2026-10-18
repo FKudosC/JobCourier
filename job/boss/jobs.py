@@ -35,7 +35,7 @@ from job.utils import as_dict
 LogSink = Callable[[str, str], Awaitable[None]]
 
 if TYPE_CHECKING:
-    from patchright.async_api import BrowserContext, Locator, Page, Response
+    from patchright.async_api import Locator, Page, Response
 
     from job.boss.review import JobReviewer
     from job.boss.session import BossSession
@@ -47,18 +47,19 @@ DESCRIPTION = ".job-sec-text"
 
 
 async def read_description(
-    context: BrowserContext, link: str, *, attempts: int = 3, stop: asyncio.Event | None = None
+    session: "BossSession", link: str, *, attempts: int = 3, stop: asyncio.Event | None = None
 ) -> str:
     """在新标签页打开职位详情页读职位描述，读不到隔几秒重试；都失败返回空串。
 
     传入 ``stop`` 时：每轮尝试前检查停止请求，页面打开与读取也可被停止打断。
+    开页走 ``session.new_page()``：后台静默时窗口保持最小化，不会弹出来打断前台。
     """
     for attempt in range(attempts):
         if stop is not None and stop.is_set():
             return ""
         if attempt:
             await asyncio.sleep(random.uniform(2, 5))
-        detail = await context.new_page()
+        detail = await session.new_page()
         try:
             if stop is not None:
                 text = await stop_await(stop, _read_once(detail, link), timeout=45)
@@ -66,7 +67,8 @@ async def read_description(
                 text = await _read_once(detail, link)
             if text := text.strip():
                 return text
-        except (PlaywrightError, asyncio.CancelledError):
+        except (PlaywrightError, RuntimeError, asyncio.CancelledError):
+            # RuntimeError：用户点过「关闭浏览器」，封锁期开不了页——本轮放弃即可
             pass
         finally:
             with contextlib.suppress(PlaywrightError):
@@ -501,7 +503,7 @@ class JobScraper:
         target = page
         detail: Page | None = None
         if not await self._show_job(page, job):
-            detail = await page.context.new_page()
+            detail = await self.session.new_page()
             try:
                 await detail.goto(job.link, wait_until="domcontentloaded")
             except PlaywrightError:
@@ -632,7 +634,7 @@ class JobScraper:
             pass
         if job.description or not job.link:
             return job
-        if description := await read_description(page.context, job.link, stop=self._stop):
+        if description := await read_description(self.session, job.link, stop=self._stop):
             return job.model_copy(update={"description": description})
         await self._log(f"{job.title} 职位详情加载失败，先按列表信息判断")
         return job

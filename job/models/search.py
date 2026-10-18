@@ -102,6 +102,7 @@ class SearchConfigRow(SQLModel, table=True):
     )
     resume_path: str = Field(default="", description="简历 PDF 本地路径")
     resume_text: str = Field(default="", description="简历文本（从 PDF 解析，可手动修改）")
+    photo_path: str = Field(default="", description="生活照本地路径（网申时上传用）")
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="最后更新时间（UTC）",
@@ -124,6 +125,7 @@ class SearchConfigRow(SQLModel, table=True):
             "salary_max": self.salary_max,
             "resume_path": self.resume_path,
             "resume_text": self.resume_text,
+            "photo_path": self.photo_path,
         }
 
     @classmethod
@@ -165,6 +167,7 @@ class SearchConfigRow(SQLModel, table=True):
         salary_max: float | None = None,
         resume_path: str | None = None,
         resume_text: str | None = None,
+        photo_path: str | None = None,
         **lists: list[str] | None,
     ) -> dict[str, Any]:
         """更新求职配置；未传的参数保持原值。
@@ -188,6 +191,7 @@ class SearchConfigRow(SQLModel, table=True):
                 "score_filter": score_filter,
                 "resume_path": resume_path,
                 "resume_text": resume_text,
+                "photo_path": photo_path,
             }
             for field, value in scalars.items():
                 if value is not None:

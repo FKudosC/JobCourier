@@ -1,0 +1,122 @@
+<!doctype html>
+<!--
+  夹具：HR 系统常见的一长串栏位（真 label 写法），覆盖学校简历之外的那批字段。
+  公司、岗位、选项都是编造的样例数据，不含任何真实个人信息。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>社会招聘登记表 - 澄明网络</title>
+  </head>
+  <body>
+    <h1>应聘人员登记表</h1>
+    <form class="apply-form" action="/apply" method="post">
+      <div class="field">
+        <label for="h-nation">民族</label>
+        <input id="h-nation" name="nation" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-political">政治面貌</label>
+        <input id="h-political" name="political" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-idtype">证件类型</label>
+        <input id="h-idtype" name="idType" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-idcard">身份证号码</label>
+        <input id="h-idcard" name="idNo" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-idexpiry">身份证有效期</label>
+        <input id="h-idexpiry" name="idExpiry" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-native">籍贯</label>
+        <input id="h-native" name="nativePlace" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-origin">生源地</label>
+        <input id="h-origin" name="originPlace" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-marital">婚姻状况</label>
+        <input id="h-marital" name="marital" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-height">身高</label>
+        <input id="h-height" name="height" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-study">学习形式</label>
+        <input id="h-study" name="studyMode" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-gpa">GPA</label>
+        <input id="h-gpa" name="gpa" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-rank">专业排名</label>
+        <input id="h-rank" name="rank" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-cet">英语等级</label>
+        <input id="h-cet" name="cet" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-emn">紧急联系人姓名</label>
+        <input id="h-emn" name="emergencyName" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-emr">与本人关系</label>
+        <input id="h-emr" name="emergencyRelation" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-emp">紧急联系人电话</label>
+        <input id="h-emp" name="emergencyPhone" type="tel" />
+      </div>
+
+      <div class="field">
+        <label for="h-family">家庭成员</label>
+        <textarea id="h-family" name="familyMember" rows="3"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="h-referral">内推码</label>
+        <input id="h-referral" name="referralCode" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-source">信息来源</label>
+        <input id="h-source" name="sourceChannel" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-bank">开户行</label>
+        <input id="h-bank" name="bankName" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="h-card">银行卡号</label>
+        <input id="h-card" name="bankCard" type="text" />
+      </div>
+
+      <button type="submit">提交</button>
+    </form>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<!--
+  夹具：省 / 市 / 区三级联动原生下拉——下一级的选项要等上一级选完才由脚本刷出来。
+  同一栏在页面上出现三次，标签都是「生源地」。公司、岗位、地址都是编造的样例数据。
+  期望：填表时逐级往下选，三级都落到对的 value 上，而不是只填到省。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>应聘登记 - 澜石智造</title>
+  </head>
+  <body>
+    <h1>应聘登记表</h1>
+    <form action="/apply" method="post">
+      <table class="form-table">
+        <tr>
+          <td class="lab">姓名</td>
+          <td><input name="shName" type="text" /></td>
+        </tr>
+        <tr>
+          <td class="lab">生源地</td>
+          <td>
+            <select name="originProvince">
+              <option value="">请选择</option>
+              <option value="440000">广东省</option>
+              <option value="330000">浙江省</option>
+            </select>
+          </td>
+        </tr>
+        <tr>
+          <td class="lab">生源地</td>
+          <td>
+            <select name="originCity"><option value="">所属城市</option></select>
+          </td>
+        </tr>
+        <tr>
+          <td class="lab">生源地</td>
+          <td>
+            <select name="originDistrict"><option value="">所属区县</option></select>
+          </td>
+        </tr>
+      </table>
+      <button type="submit">提交</button>
+    </form>
+    <script>
+      const CITIES = {
+        "440000": [["440100", "广州市"]],
+        "330000": [["330100", "杭州市"]],
+      };
+      const DISTRICTS = {
+        "440100": [["440106", "天河区"]],
+        "330100": [["330106", "西湖区"]],
+      };
+      function refill(select, rows, placeholder) {
+        select.innerHTML = "";
+        const head = document.createElement("option");
+        head.value = "";
+        head.textContent = placeholder;
+        select.appendChild(head);
+        for (const [value, text] of rows || []) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = text;
+          select.appendChild(option);
+        }
+      }
+      const province = document.querySelector("select[name=originProvince]");
+      const city = document.querySelector("select[name=originCity]");
+      const district = document.querySelector("select[name=originDistrict]");
+      province.addEventListener("change", () => {
+        refill(city, CITIES[province.value], "所属城市");
+        refill(district, [], "所属区县");
+      });
+      city.addEventListener("change", () => {
+        refill(district, DISTRICTS[city.value], "所属区县");
+      });
+    </script>
+  </body>
+</html>

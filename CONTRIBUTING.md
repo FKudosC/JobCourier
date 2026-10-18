@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-- Python 3.12，依赖用 [uv](https://docs.astral.sh/uv/) 管理
+- Python 3.12，依赖用 uv 管理
 - Node.js 22+（自带 npm），用于构建前端
 - Google Chrome（自动投递通过本机 Chrome 完成）
 

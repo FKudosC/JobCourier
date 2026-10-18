@@ -1,0 +1,72 @@
+<!doctype html>
+<!--
+  夹具：纯角色控件。有一类组件库的 Select / Cascader / DatePicker / Switch 压根不渲染
+  <input>，整栏只有一个带 role 的 div（antd 的 Select、element-ui 的 el-select、
+  各种自研组件都会这么写）。按控件标签扫会整栏漏掉——这是「换个企业又少一大堆栏」
+  的根子之一。这份夹具专门盯住那条兜底路径：一个 input 都不给，栏位仍要扫出来，
+  控件类型（select / cascader / date / checkbox）也要认对。
+  公司、岗位、选项都是编造的样例数据。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>社会招聘 - 云栖数据</title>
+    <style>
+      body { font-family: sans-serif; }
+      .field { margin: 10px 0; }
+      .ant-select, .ant-cascader, .ant-picker { width: 220px; height: 30px; }
+      .ant-switch { display: inline-block; width: 44px; height: 22px; background: #ccc; }
+    </style>
+  </head>
+  <body>
+    <h1>应聘登记表</h1>
+    <form class="apply-form" action="/apply" method="post">
+      <div class="field">
+        <span>期望工作城市</span>
+        <div class="ant-select" role="combobox" aria-haspopup="listbox" aria-required="true">
+          <div class="ant-select-selector">
+            <span class="ant-select-selection-placeholder">请选择</span>
+          </div>
+          <div class="ant-select-dropdown" role="listbox" hidden>
+            <div role="option">杭州</div>
+            <div role="option">上海</div>
+            <div role="option">北京</div>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <span>户籍所在地</span>
+        <div class="ant-cascader" role="combobox" aria-haspopup="tree">
+          <span class="ant-cascader-placeholder">请选择</span>
+          <div class="ant-cascader-menus" role="tree" hidden>
+            <div role="treeitem">浙江省</div>
+            <div role="treeitem">江苏省</div>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <span>出生年月</span>
+        <div class="ant-picker" aria-haspopup="grid">
+          <span class="ant-picker-placeholder">请选择日期</span>
+        </div>
+      </div>
+      <div class="field">
+        <span>政治面貌</span>
+        <div class="ant-select" role="combobox" aria-haspopup="listbox">
+          <div class="ant-select-selector">
+            <span class="ant-select-selection-placeholder">请选择</span>
+          </div>
+          <div class="ant-select-dropdown" role="listbox" hidden>
+            <div role="option">共青团员</div>
+            <div role="option">中共党员</div>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <span>是否服从调剂</span>
+        <div class="ant-switch" role="switch" aria-checked="false"></div>
+      </div>
+      <button type="submit">提交申请</button>
+    </form>
+  </body>
+</html>

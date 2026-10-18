@@ -861,7 +861,7 @@ class ChatResponder:
         """在新标签页打开职位详情读职位描述（失败会重试）；读不到返回空串。"""
         if not job.link:
             return ""
-        if not (description := await read_description(page.context, job.link)):
+        if not (description := await read_description(self.session, job.link)):
             await self._log(f"{job.title} 职位详情加载失败，按已有信息判断", "warn")
         return description
 

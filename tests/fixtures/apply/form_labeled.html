@@ -1,0 +1,64 @@
+<!doctype html>
+<!--
+  夹具：真 label 写法（最常见的一类官网表单）。
+  公司、岗位、选项都是编造的样例数据，不含任何真实个人信息。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>校园招聘在线申请 - 星野科技</title>
+  </head>
+  <body>
+    <h1>校园招聘在线申请</h1>
+    <form class="apply-form" action="/apply" method="post">
+      <div class="field">
+        <label for="f-name">姓名</label>
+        <input id="f-name" name="candidateName" type="text" />
+      </div>
+
+      <div class="field">
+        <span class="lab">性别</span>
+        <label><input type="radio" name="gender" value="男" />男</label>
+        <label><input type="radio" name="gender" value="女" />女</label>
+      </div>
+
+      <div class="field">
+        <label for="f-phone">手机号码</label>
+        <input id="f-phone" name="mobile" type="tel" />
+      </div>
+
+      <div class="field">
+        <label for="f-email">电子邮箱</label>
+        <input id="f-email" name="mail" type="email" />
+      </div>
+
+      <div class="field">
+        <label for="f-degree">最高学历</label>
+        <select id="f-degree" name="degree">
+          <option value="">请选择</option>
+          <option>大专</option>
+          <option>本科</option>
+          <option>硕士</option>
+          <option>博士</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="f-school">毕业学校</label>
+        <input id="f-school" name="school" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="f-major">所学专业</label>
+        <input id="f-major" name="major" type="text" />
+      </div>
+
+      <div class="field">
+        <label for="f-grad">毕业年份</label>
+        <input id="f-grad" name="graduateYear" type="text" />
+      </div>
+
+      <button type="submit">提交申请</button>
+    </form>
+  </body>
+</html>

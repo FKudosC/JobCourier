@@ -39,6 +39,47 @@ def _loads(raw: str) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict)]
 
 
+HANDOFF_GROUPS: tuple[str, ...] = ("gaps", "unsure", "manual")
+
+
+def _load_handoff(raw: str) -> dict[str, list[dict[str, Any]]]:
+    """交付清单 JSON → ``{gaps, unsure, manual}``；损坏或为空时三堆都空。
+
+    三堆的键固定，前端不用判空：``gaps`` 是「资料里没有、去补上就能自动填」，
+    ``unsure`` 是「AI 兜底填的，请扫一眼」，``manual`` 是「没认出来，只能手填」。
+    """
+    blank: dict[str, list[dict[str, Any]]] = {name: [] for name in HANDOFF_GROUPS}
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return blank
+    if not isinstance(data, dict):
+        return blank
+    for name in HANDOFF_GROUPS:
+        items = data.get(name)
+        if isinstance(items, list):
+            blank[name] = [item for item in items if isinstance(item, dict)]
+    return blank
+
+
+def _dump_handoff(handoff: dict[str, Any]) -> str:
+    """交付清单 → JSON 文本；只留三堆，别把别的东西写进库。"""
+    clean = {name: list(handoff.get(name) or []) for name in HANDOFF_GROUPS}
+    return json.dumps(clean, ensure_ascii=False)
+
+
+# 「手动」是用户亲手写的，「AI推算」是模型按已有资料推的。只有前者能压后者，
+# 反过来不行——推错了也不该盖掉用户自己敲过的那条。
+_AI_SOURCE = "AI推算"
+
+
+def _weaker(new: str, old: str) -> bool:
+    """新来的这条是不是比库里那条弱（弱的别盖掉强的）。"""
+    if not old or new == old:
+        return False
+    return new == _AI_SOURCE and old != _AI_SOURCE
+
+
 def domain_of(url: str) -> str:
     """取网址域名（去掉 www. 前缀），字段映射按它复用。"""
     host = (urlparse(url).hostname or "").lower()
@@ -70,13 +111,20 @@ class ApplicationRow(SQLModel, table=True):
     status: str = Field(default="pending", index=True, description="状态，见 STATUS_LABELS")
     note: str = Field(default="", description="最近一次操作的说明或报错")
     fields_json: str = Field(default="[]", description="最近一次字段对照表（JSON 数组）")
+    # 填表跑完留下的交付清单：哪些栏缺资料、哪些是 AI 兜底、哪些得手填。
+    # 存成结构化的一列而不是只写进 note，面板才能逐条点着去补。
+    handoff_json: str = Field(default="{}", description="最近一次交付清单（JSON 对象）")
     submitted_at: datetime | None = Field(default=None, description="提交时间（UTC）")
     created_at: datetime = Field(default_factory=_now, index=True, description="建立时间（UTC）")
     updated_at: datetime = Field(default_factory=_now, description="最后更新时间（UTC）")
 
     def to_dict(self) -> dict[str, Any]:
         """转为前端字典。"""
-        return {
+        # 阶段（待扫描 / 已扫描 / 待确认 / 已确认 / 已填表）不额外存一列，
+        # 由状态 + 对照表现算：省得出现「状态说已填表、对照表却是空的」这种自相矛盾的数据。
+        from job.apply.pipeline import stage_label, stage_of
+
+        data = {
             "uid": self.uid,
             "jobUid": self.job_uid,
             "platform": self.platform,
@@ -90,10 +138,15 @@ class ApplicationRow(SQLModel, table=True):
             "statusLabel": self.STATUS_LABELS.get(self.status, self.status),
             "note": self.note,
             "fields": _loads(self.fields_json),
+            "handoff": _load_handoff(self.handoff_json),
             "submittedAt": _local_iso(self.submitted_at),
             "createdAt": _local_iso(self.created_at),
             "updatedAt": _local_iso(self.updated_at),
         }
+        stage = stage_of(data, self.uid)
+        data["stage"] = stage
+        data["stageLabel"] = stage_label(stage)
+        return data
 
     @classmethod
     def create(cls, job_uid: str, url: str = "") -> ApplicationRow:
@@ -221,8 +274,20 @@ class ApplicationRow(SQLModel, table=True):
             return row.to_dict()
 
     @classmethod
-    def save_fields(cls, uid: str, fields: list[dict[str, Any]], *, note: str = "") -> dict[str, Any] | None:
-        """存下字段对照表（扫描或填表后调用）。"""
+    def save_fields(
+        cls,
+        uid: str,
+        fields: list[dict[str, Any]],
+        *,
+        note: str | None = None,
+        handoff: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """存下字段对照表（扫描或填表后调用）。
+
+        ``note`` 传 ``None``（默认）表示不动备注，传空串表示清掉旧备注。
+        ``handoff`` 同理：传 ``None`` 表示不动交付清单，传字典（哪怕三堆都空）
+        表示按这份清单覆盖——换了张表单，旧的交付清单就不该留着误导人。
+        """
         from job.models import db_session
 
         with db_session() as session:
@@ -230,8 +295,10 @@ class ApplicationRow(SQLModel, table=True):
             if row is None:
                 return None
             row.fields_json = json.dumps(fields, ensure_ascii=False)
-            if note:
+            if note is not None:
                 row.note = note
+            if handoff is not None:
+                row.handoff_json = _dump_handoff(handoff)
             row.updated_at = _now()
             session.add(row)
             session.commit()
@@ -240,7 +307,7 @@ class ApplicationRow(SQLModel, table=True):
 
     @classmethod
     def set_status(cls, uid: str, status: str, *, note: str = "") -> dict[str, Any] | None:
-        """改状态；``submitted`` 会记一次提交时间。"""
+        """改状态；``submitted`` 会记一次提交时间，退回别的状态则清掉它。"""
         from job.models import db_session
 
         with db_session() as session:
@@ -252,6 +319,9 @@ class ApplicationRow(SQLModel, table=True):
                 row.note = note
             if status == "submitted":
                 row.submitted_at = _now()
+            else:
+                # 撤销提交 / 重新填表：提交时间不该留着，否则统计里会一直算成已提交
+                row.submitted_at = None
             row.updated_at = _now()
             session.add(row)
             session.commit()
@@ -281,7 +351,10 @@ class ApplyMappingRow(SQLModel, table=True):
     domain: str = Field(default="", index=True)
     label: str = Field(default="", description="字段标签，仅供排查")
     value: str = Field(default="", description="上次填的内容")
-    source: str = Field(default="", description="来源：profile / resume / ai / manual")
+    # 资料键（如 ``school`` / 自定义字段名）：下次沿用时靠它还原成下拉里那条资料
+    source: str = Field(default="", description="字段键：资料里的键名")
+    # 用户手动改过的映射：下次扫描优先沿用，不被规则或 AI 覆盖
+    manual: bool = Field(default=False, description="用户手动改过，优先沿用")
     updated_at: datetime = Field(default_factory=_now)
 
     @staticmethod
@@ -301,8 +374,23 @@ class ApplyMappingRow(SQLModel, table=True):
         return {row.key.removeprefix(f"{domain}::"): row for row in rows}
 
     @classmethod
+    def rows_for_domain(cls, domain: str) -> list["ApplyMappingRow"]:
+        """取该域名下记住的全部映射，按更新时间倒序。
+
+        站点改版换了签名（name / id 变了）、栏名却没变时，靠标签也能沿用旧映射，
+        所以这里要按域名整取一批，再由调用方按归一化标签建索引。
+        """
+        from job.models import db_session
+
+        if not domain:
+            return []
+        with db_session() as session:
+            rows = session.exec(select(cls).where(cls.domain == domain)).all()
+        return sorted(rows, key=lambda row: row.updated_at, reverse=True)
+
+    @classmethod
     def remember(cls, domain: str, items: list[dict[str, Any]]) -> int:
-        """记下一批映射；``items`` 每项含 ``signature`` / ``label`` / ``value`` / ``source``。"""
+        """记下一批映射；``items`` 每项含 ``signature`` / ``label`` / ``value`` / ``source`` / ``manual``。"""
         from job.models import db_session
 
         if not domain or not items:
@@ -319,6 +407,7 @@ class ApplyMappingRow(SQLModel, table=True):
                 row.label = str(item.get("label") or row.label)
                 row.value = value
                 row.source = str(item.get("source") or row.source)
+                row.manual = bool(item.get("manual", row.manual))
                 row.updated_at = _now()
                 session.add(row)
                 saved += 1
@@ -334,6 +423,306 @@ class ApplyMappingRow(SQLModel, table=True):
             return 0
         with db_session() as session:
             rows = session.exec(select(cls).where(cls.domain == domain)).all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+        return len(rows)
+
+
+class ApplyLearnedRow(SQLModel, table=True):
+    """本机学会的字段：用户在某个官网手工补了资料库里没有的一项，就记下来。
+
+    :class:`ApplyMappingRow` 记的是「这个网站的哪一栏填了什么」，换个网站就不认；
+    这里记的是「资料库本身缺的那一条」，全站通用——同一个键在别家官网再遇到，
+    直接就有值可填。下次进「网申资料」时它按「记忆」来源出现在对照表上，用户
+    也可以在配置中心里逐条删掉。
+    """
+
+    __tablename__ = "apply_learned"  # pyright: ignore[reportAssignmentType]
+
+    key: str = Field(primary_key=True, description="字段键：内置键，或用户自定的名称")
+    label: str = Field(default="", description="学到的界面标签，仅供排查与展示")
+    value: str = Field(default="", description="学到的那条内容")
+    domain: str = Field(default="", description="第一次学到的站点")
+    # 这条打哪来：``手动``（用户在官网或对照表上自己敲的）与 ``AI推算``（模型按已有
+    # 资料推出来、用户点了「填入浏览器」认可下来的）。界面按它分色，用户一眼看得出
+    # 哪几条不是自己写的。
+    source: str = Field(default="", description="来源：手动 / AI推算")
+    basis: str = Field(default="", description="推算依据；手填的为空")
+    confidence: float = Field(default=0.0, description="推算可信度；0 表示没打分")
+    updated_at: datetime = Field(default_factory=_now)
+
+    @classmethod
+    def learn(cls, domain: str, items: list[dict[str, Any]]) -> int:
+        """记下一批「新学到的」字段。
+
+        ``items`` 每项含 ``key`` / ``label`` / ``value``，可选 ``source`` /
+        ``basis`` / ``confidence``。
+
+        空键空值一律跳过；同一个键再学到（用户改了内容）就覆盖，只留最新的一条。
+        唯一例外是**手填的不会被推算盖掉**：用户亲手写过的那条永远优先。
+        """
+        from job.models import db_session
+
+        clean = [
+            (str(item.get("key") or "").strip(), str(item.get("label") or "").strip(),
+             str(item.get("value") or "").strip(), str(item.get("source") or "").strip(),
+             str(item.get("basis") or "").strip(), float(item.get("confidence") or 0))
+            for item in items
+        ]
+        clean = [row for row in clean if row[0] and row[2]]
+        if not clean:
+            return 0
+        saved = 0
+        with db_session() as session:
+            for key, label, value, source, basis, confidence in clean:
+                row = session.get(cls, key) or cls(key=key)
+                if _weaker(source, row.source):
+                    continue
+                row.label = label or row.label
+                row.value = value
+                row.domain = domain or row.domain
+                row.source = source or row.source
+                row.basis = basis if source == "AI推算" else ""
+                row.confidence = confidence
+                row.updated_at = _now()
+                session.add(row)
+                saved += 1
+            session.commit()
+        return saved
+
+    @classmethod
+    def values(cls) -> dict[str, str]:
+        """字段键 → 学到的那条内容。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            rows = session.exec(select(cls)).all()
+        # 手填的压过推算的：同一个键两条并存时，取用户自己写过的那条
+        best: dict[str, ApplyLearnedRow] = {}
+        for row in rows:
+            if not row.value:
+                continue
+            old = best.get(row.key)
+            if old is None or _weaker(old.source, row.source):
+                best[row.key] = row
+        return {key: row.value for key, row in best.items()}
+
+    @classmethod
+    def rows(cls) -> list[dict[str, Any]]:
+        """全部学到的字段，按更新时间倒序，供配置中心展示。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            rows = session.exec(select(cls)).all()
+        rows.sort(key=lambda row: row.updated_at, reverse=True)
+        return [
+            {
+                "key": row.key,
+                "label": row.label or row.key,
+                "value": row.value,
+                "domain": row.domain,
+                "source": row.source or "手动",
+                "basis": row.basis,
+                "confidence": row.confidence,
+                "updated_at": _local_iso(row.updated_at),
+            }
+            for row in rows
+        ]
+
+    @classmethod
+    def forget(cls, key: str) -> bool:
+        """删掉学到的某一条；不存在返回 False。"""
+        from job.models import db_session
+
+        if not key:
+            return False
+        with db_session() as session:
+            row = session.get(cls, key)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    @classmethod
+    def confirm(cls, key: str) -> bool:
+        """用户核对过一条 AI 推算：来源改成「手动」，撤掉树上的「待核对」。
+
+        推得不对的走 :meth:`forget`；推得对的走这里——确认之后这条就算用户自己
+        认下的，不必再复核。``basis`` 换成一句「已核对」，用户回头翻还能看出
+        它最早是模型推的，而不是自己敲的。
+        """
+        from job.models import db_session
+
+        if not key:
+            return False
+        with db_session() as session:
+            row = session.get(cls, key)
+            if row is None or row.source != _AI_SOURCE:
+                return False
+            row.source = "手动"
+            row.basis = "模型推的，你已经核对过"
+            row.updated_at = _now()
+            session.add(row)
+            session.commit()
+            return True
+
+    @classmethod
+    def clear(cls) -> int:
+        """清空学到的全部字段，返回删除条数。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            rows = session.exec(select(cls)).all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+        return len(rows)
+
+
+class ApplyAliasRow(SQLModel, table=True):
+    """用户认下的「这两个叫法指的是同一条资料」。
+
+    官网写「民族」、别家写「ethnicity」、用户自己补的栏写「所属民族」——本机靠
+    内置别名表能并掉大部分，剩下并不掉的就由用户在信息树上手动合并一条。
+    合并结果存在这里，:func:`job.apply.knowledge.canonical_key` 会先查它，
+    这样同一个东西不会在库里、在填写时被当成两三条。
+    """
+
+    __tablename__ = "apply_alias"  # pyright: ignore[reportAssignmentType]
+
+    # 被并掉的那个叫法（归一化后的小写写法，和 canonical_key 的查法一致）
+    alias: str = Field(primary_key=True, description="被并掉的叫法")
+    # 并到哪个键上；空串表示这条合并作废
+    key: str = Field(default="", description="并到的规范键")
+    updated_at: datetime = Field(default_factory=_now)
+
+    @classmethod
+    def pairs(cls) -> dict[str, str]:
+        """全部合并关系：``{被并掉的叫法: 规范键}``；读不到库时返回空表。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            rows = session.exec(select(cls)).all()
+        return {row.alias: row.key for row in rows if row.alias and row.key}
+
+    @classmethod
+    def merge(cls, alias: str, key: str) -> bool:
+        """记下一条合并关系；``alias`` 与 ``key`` 归一化后相同、或任一为空则不记。
+
+        自带环保护：``a → b`` 已存在时再存 ``b → a`` 会两边都并没了，直接拒掉。
+        """
+        from job.models import db_session
+
+        left = _alias_text(alias)
+        right = _alias_text(key)
+        if not left or not right or left == right:
+            return False
+        with db_session() as session:
+            if (back := session.get(cls, right)) is not None and back.key == left:
+                return False
+            row = session.get(cls, left) or cls(alias=left)
+            row.key = right
+            row.updated_at = _now()
+            session.add(row)
+            session.commit()
+        return True
+
+    @classmethod
+    def unmerge(cls, alias: str) -> bool:
+        """撤掉一条合并关系；不存在返回 False。"""
+        from job.models import db_session
+
+        text = _alias_text(alias)
+        if not text:
+            return False
+        with db_session() as session:
+            row = session.get(cls, text)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+
+def _alias_text(raw: str) -> str:
+    """合并关系里的叫法统一成小写去空白的写法，查表才不会大小写对不上。"""
+    return str(raw or "").strip().lower()
+
+
+class ApplyRejectRow(SQLModel, table=True):
+    """用户在「AI 推理（请核对）」里删掉的那几条：同一站点同一键下次不再推。
+
+    模型对同一张表常给出同一条推算（「生源地」推成「四川」之类）。用户删掉就是
+    不认这条；不记下来，下次重扫又原样冒出来，等于让人反复删同一样东西。这里按
+    ``域名::资料键`` 记一笔，:class:`~job.apply.matcher.FieldMatcher` 出计划时跳过。
+    """
+
+    __tablename__ = "apply_reject"  # pyright: ignore[reportAssignmentType]
+
+    key: str = Field(primary_key=True, description="``域名::资料键``")
+    domain: str = Field(default="", index=True)
+    field_key: str = Field(default="", description="被否掉的资料键")
+    updated_at: datetime = Field(default_factory=_now)
+
+    @staticmethod
+    def make_key(domain: str, field_key: str) -> str:
+        return f"{domain}::{field_key}"
+
+    @classmethod
+    def remember(cls, domain: str, keys: list[str]) -> int:
+        """记下一批被否掉的资料键；空域名 / 空键跳过。"""
+        from job.models import db_session
+
+        if not domain:
+            return 0
+        clean = sorted({str(key or "").strip() for key in keys} - {""})
+        if not clean:
+            return 0
+        with db_session() as session:
+            for field_key in clean:
+                name = cls.make_key(domain, field_key)
+                row = session.get(cls, name) or cls(key=name, domain=domain)
+                row.field_key = field_key
+                row.updated_at = _now()
+                session.add(row)
+            session.commit()
+        return len(clean)
+
+    @classmethod
+    def rejected(cls, domain: str) -> set[str]:
+        """该域名下被用户否掉过的资料键。"""
+        from job.models import db_session
+
+        if not domain:
+            return set()
+        with db_session() as session:
+            rows = session.exec(select(cls).where(cls.domain == domain)).all()
+        return {row.field_key for row in rows if row.field_key}
+
+    @classmethod
+    def forget(cls, domain: str, field_key: str) -> bool:
+        """撤掉一条拒绝记录；不存在返回 False。"""
+        from job.models import db_session
+
+        if not domain or not field_key:
+            return False
+        with db_session() as session:
+            row = session.get(cls, cls.make_key(domain, field_key))
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    @classmethod
+    def clear(cls) -> int:
+        """清空全部拒绝记录，返回删除条数。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            rows = session.exec(select(cls)).all()
             for row in rows:
                 session.delete(row)
             session.commit()

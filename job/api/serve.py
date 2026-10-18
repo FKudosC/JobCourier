@@ -4,12 +4,16 @@
 ``python -m job`` 都指向这里。Windows 以 GUI 方式启动时进程没有 stdout/stderr，
 会崩掉 uvicorn 的日志初始化，所以在这个模块导入 uvicorn 之前先把它们兜到日志
 文件（带轮转，避免长跑后日志无限增长）。
+
+后台运行用 ``--background``（或环境变量 ``JOB_COURIER_BACKGROUND=1``）说明，
+此时一定落日志文件、且不会自动弹面板窗口（要弹就再加 ``--open``）。
 """
 
 from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import socket
 import sys
 import threading
@@ -22,8 +26,41 @@ from job.paths import USER_DATA_DIR
 
 _READY_TIMEOUT = 300.0
 
+# 后台运行的显式开关：环境变量 JOB_COURIER_BACKGROUND=1，或命令行 --background。
+# 为什么不能只靠 isatty：Windows 上虚拟环境的 pythonw.exe 有时只是个转发壳，它会
+# 拉起控制台版的 python.exe，于是进程又挂上了控制台，isatty 也会骗人。
+_BACKGROUND_ENV = "JOB_COURIER_BACKGROUND"
+_BACKGROUND_ARGS = {"--background", "--bg"}
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _background_requested() -> bool:
+    """调用方是否明确要求后台运行（不看终端，只看开关）。"""
+    if _truthy(os.environ.get(_BACKGROUND_ENV)):
+        return True
+    return any(arg in _BACKGROUND_ARGS for arg in sys.argv[1:])
+
+
+def _headless() -> bool:
+    """是不是「没有终端」的启动方式：GUI 启动、后台开关、或被别的程序拉起。"""
+    if _background_requested():
+        return True
+    if sys.stdout is None or sys.stderr is None:
+        return True
+    try:
+        return not sys.stdout.isatty()
+    except (OSError, ValueError):
+        return True
+
+
+# 没有终端时把标准流兜到日志文件：这种场景下进程照样在跑，日志却除了界面那一栏
+# 就再没落点，出了事没法事后翻账。判据用「不是终端」而不是「句柄为空」——
+# 被后台拉起时句柄往往是有效管道，只看 None 会漏。
 _log_file = None
-if sys.stdout is None or sys.stderr is None:
+if _headless():
     _log_path = USER_DATA_DIR / "logs" / "backend.log"
     _log_path.parent.mkdir(parents=True, exist_ok=True)
     _log_file = logging.handlers.RotatingFileHandler(
@@ -75,6 +112,9 @@ def _open_browser_when_ready() -> None:
 
 def run(*, open_browser: bool = False) -> None:
     """启动服务；``open_browser`` 为真时在就绪后打开默认浏览器。"""
+    if _background_requested() and "--open" not in sys.argv[1:]:
+        # 后台启动不该顺手弹出面板窗口；确实想要就显式加 --open
+        open_browser = False
     if _ping_ok():
         log.info("检测到本地服务已在运行（%s），不重复启动", URL)
         if open_browser:

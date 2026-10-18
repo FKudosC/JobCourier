@@ -31,8 +31,9 @@ from pydantic_ai.exceptions import AgentRunError
 
 from job.api.net import DEV_PORT
 from job.api.runtime import ApiError, runtime
+from job.apply import knowledge
 from job.apply.assistant import ApplyError
-from job.apply.profile import ApplyProfile
+from job.apply.profile import ApplyProfile, learned_values
 from job.boss.filters import (
     City,
     Education,
@@ -49,7 +50,7 @@ from job.boss.keywords import KeywordAgent
 from job.boss.resume_tailor import ResumeTailor, load_saved_resume, save_custom_resume
 from job.models import init_db, migration_warnings
 from job.models import stats as stats_mod
-from job.models.application import ApplicationRow
+from job.models.application import ApplicationRow, ApplyAliasRow, ApplyLearnedRow
 from job.models.blacklist import CompanyBlacklistRow
 from job.models.chat import ChatMessageRow, ChatStatusRow
 from job.models.company import CompanyRow
@@ -57,14 +58,19 @@ from job.models.job import JobRow
 from job.models.pending import ReplyPendingRow
 from job.models.search import DEFAULT_MIN_SCORE, LIST_FIELDS, SearchConfigRow
 from job.models.setting import (
+    ApplyAutoSettings,
+    ApplyLocateSettings,
     ApplyProfileSettings,
+    ApplyVisionSettings,
     AutoReplySettings,
+    CaptchaSettings,
     LlmSettings,
     TailorSettings,
+    TelemetrySettings,
 )
 from job.utils import log_exception
 from job.utils.llm import explain
-from job.utils.resume import ResumePdf
+from job.utils.resume import IMAGE_SUFFIXES, ResumePdf
 
 # 开发模式：只有跑 ``vite dev``（5173 端口）时才需要跨源白名单与接口文档。
 # 生产由后端同源伺服前端静态文件（8000 端口），既不需要 CORS，也不该暴露文档。
@@ -310,7 +316,10 @@ def config_bundle() -> dict:
         "salary_min": f"{float(config.get('salary_min') or 0):g}",
         "salary_max": f"{float(config.get('salary_max') or 0):g}",
         "resume_path": str(config.get("resume_path") or ""),
+        "resume_size": _file_size(str(config.get("resume_path") or "")),
         "resume_text": str(config.get("resume_text") or ""),
+        "photo_path": str(config.get("photo_path") or ""),
+        "photo_size": _file_size(str(config.get("photo_path") or "")),
         "tailor": {"enabled": tailor.enabled, "min_score": tailor.min_score},
         "reply": {
             "enabled": reply.enabled,
@@ -324,6 +333,11 @@ def config_bundle() -> dict:
         },
         "apply_profile": apply_profile_bundle(),
         "llm": llm_bundle(),
+        "captcha": captcha_bundle(),
+        "locate": locate_bundle(),
+        "vision": vision_bundle(),
+        "auto": auto_bundle(),
+        "telemetry": telemetry_bundle(),
         "blacklist": CompanyBlacklistRow.list_dicts(),
         "options": {
             "cities": City.labels(),
@@ -363,6 +377,56 @@ def llm_bundle() -> dict:
     }
 
 
+def captcha_bundle() -> dict:
+    """验证码识别配置：开关与识图模型（留空用大模型服务里的主模型）。"""
+    settings = CaptchaSettings.load()
+    return {"enabled": settings.enabled, "model": settings.model}
+
+
+def locate_bundle() -> dict:
+    """表单定位兜底配置：默认关闭，开着也只处理几个栏位。"""
+    settings = ApplyLocateSettings.load()
+    return {
+        "enabled": settings.enabled,
+        "max_fields": settings.max_fields,
+        "timeout": settings.timeout,
+    }
+
+
+def vision_bundle() -> dict:
+    """表单视觉核对配置：默认开启，但没配大模型就自动跳过。"""
+    settings = ApplyVisionSettings.load()
+    return {
+        "enabled": settings.enabled,
+        "model": settings.model,
+        "timeout": settings.timeout,
+        "max_tiles": settings.max_tiles,
+        "mask_sensitive": settings.mask_sensitive,
+    }
+
+
+def auto_bundle() -> dict:
+    """网申填表配置：文件代传与学习开关；交付口径决定填完怎么把缺项交回给人。"""
+    settings = ApplyAutoSettings.load()
+    return {
+        "handoff": settings.handoff,
+        "upload_files": settings.upload_files,
+        "learn_web": settings.learn_web,
+        "learn_ai": settings.learn_ai,
+    }
+
+
+def telemetry_bundle() -> dict:
+    """链路追踪配置：默认全关，开启后每次模型调用产出一条可回放的 span。"""
+    settings = TelemetrySettings.load()
+    return {
+        "enabled": settings.enabled,
+        "exporter": settings.exporter,
+        "endpoint": settings.endpoint,
+        "content": settings.content,
+    }
+
+
 @app.get("/api/config")
 def get_config() -> dict:
     init_db()
@@ -389,6 +453,7 @@ class SearchConfigIn(BaseModel):
     salary_max: str = "0"
     resume_path: str = ""
     resume_text: str = ""
+    photo_path: str = ""
 
 
 @app.put("/api/config/search")
@@ -425,6 +490,7 @@ def put_search_config(body: SearchConfigIn) -> dict:
         salary_max=max(0.0, salary_max),
         resume_path=body.resume_path,
         resume_text=body.resume_text,
+        photo_path=body.photo_path,
         **{f: getattr(body, f) for f in LIST_FIELDS},
     )
     return {"ok": True}
@@ -513,6 +579,46 @@ async def upload_resume(file: UploadFile = File(...)) -> dict:
     SearchConfigRow.save(resume_path=path, resume_text=text)
     hint = f"已识别简历内容，共 {len(text)} 字" if text else "未能识别简历文字，请直接粘贴简历内容"
     return {"resume_path": path, "resume_text": text, "hint": hint}
+
+
+@app.post("/api/config/photo/upload")
+async def upload_photo(file: UploadFile = File(...)) -> dict:
+    """上传生活照：只保存原件（不做 OCR），供网申表单自动上传。"""
+    data = await file.read()
+    name = file.filename or "photo.jpg"
+    if Path(name).suffix.lower() not in IMAGE_SUFFIXES:
+        raise ApiError("生活照请上传图片（jpg / png）")
+    path = str(ResumePdf.save_photo(name, data))
+    SearchConfigRow.save(photo_path=path)
+    return {"photo_path": path}
+
+
+def _file_size(path: str) -> int:
+    """本地文件字节数；文件不在了就返回 0，界面据此不显示大小。"""
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return 0
+
+
+# 简历 / 寸照的预览只放行这两个目录，别的一律挡掉（防目录穿越）。
+_PREVIEW_DIRS = (ResumePdf.DIR, ResumePdf.PHOTO_DIR)
+
+
+@app.get("/api/config/file")
+def get_config_file(path: str = "") -> FileResponse:
+    """预览上传过的简历 / 寸照：图片、PDF 直接交给浏览器显示。"""
+    if not path:
+        raise HTTPException(404, "文件不存在")
+    try:
+        resolved = Path(path).resolve(strict=True)
+    except OSError as exc:
+        raise HTTPException(404, "文件不存在") from exc
+    if not resolved.is_file():
+        raise HTTPException(404, "文件不存在")
+    if not any(resolved.is_relative_to(root.resolve()) for root in _PREVIEW_DIRS):
+        raise HTTPException(403, "不允许访问该路径")
+    return FileResponse(resolved)
 
 
 class TailorIn(BaseModel):
@@ -701,6 +807,100 @@ async def test_llm(body: LlmIn) -> dict:
         raise ApiError(f"连接失败：{log_exception('api', exc)}") from exc
     preview = reply[:20] if reply else "（空回复）"
     return {"preview": preview}
+
+
+class CaptchaIn(BaseModel):
+    enabled: bool = False
+    model: str = ""
+
+
+@app.put("/api/config/captcha")
+def put_captcha(body: CaptchaIn) -> dict:
+    """保存验证码识别设置：开关 + 识图模型。"""
+    CaptchaSettings(enabled=body.enabled, model=body.model.strip()).save()
+    return captcha_bundle()
+
+
+class LocateIn(BaseModel):
+    enabled: bool = False
+    # 护栏：一次扫描最多几个栏位、每个栏位多少秒，越界一律夹到安全区间
+    max_fields: int = 3
+    timeout: int = 15
+
+
+@app.put("/api/config/locate")
+def put_locate(body: LocateIn) -> dict:
+    """保存表单定位兜底设置：默认关闭，个数与超时都夹在安全区间里。"""
+    ApplyLocateSettings(
+        enabled=body.enabled,
+        max_fields=min(10, max(1, int(body.max_fields))),
+        timeout=min(60, max(5, int(body.timeout))),
+    ).save()
+    return locate_bundle()
+
+
+class VisionIn(BaseModel):
+    enabled: bool = True
+    model: str = ""
+    # 护栏：一次核对多少秒、最多甩给模型几屏截图，越界一律夹到安全区间
+    timeout: int = 40
+    max_tiles: int = 4
+    mask_sensitive: bool = True
+
+
+@app.put("/api/config/vision")
+def put_vision(body: VisionIn) -> dict:
+    """保存表单视觉核对设置：默认开启，超时与分片数都夹在安全区间里。"""
+    ApplyVisionSettings(
+        enabled=body.enabled,
+        model=body.model.strip(),
+        timeout=min(120, max(5, int(body.timeout))),
+        max_tiles=min(12, max(1, int(body.max_tiles))),
+        mask_sensitive=body.mask_sensitive,
+    ).save()
+    return vision_bundle()
+
+
+class AutoIn(BaseModel):
+    # 交付口径：只认 loose / balanced / strict，别的值一律退回 balanced
+    handoff: str = "balanced"
+    upload_files: bool = True
+    # 学不学：手填的那几条 / 认可的 AI 推算，各一个开关
+    learn_web: bool = True
+    learn_ai: bool = True
+
+
+@app.put("/api/config/auto")
+def put_auto(body: AutoIn) -> dict:
+    """保存网申填表设置：交付口径夹在安全枚举里。"""
+    level = body.handoff.strip()
+    ApplyAutoSettings(
+        handoff=level if level in ("loose", "balanced", "strict") else "balanced",
+        upload_files=body.upload_files,
+        learn_web=body.learn_web,
+        learn_ai=body.learn_ai,
+    ).save()
+    return auto_bundle()
+
+
+class TelemetryIn(BaseModel):
+    enabled: bool = False
+    # 只认 console / otlp 两种导出方式，别的值一律退回 console
+    exporter: str = "console"
+    endpoint: str = ""
+    content: bool = False
+
+
+@app.put("/api/config/telemetry")
+def put_telemetry(body: TelemetryIn) -> dict:
+    """保存链路追踪设置。TracerProvider 全局只装一次，改完需重启服务才生效。"""
+    TelemetrySettings(
+        enabled=body.enabled,
+        exporter="otlp" if body.exporter.strip() == "otlp" else "console",
+        endpoint=body.endpoint.strip(),
+        content=body.content,
+    ).save()
+    return telemetry_bundle()
 
 
 # ---------------------------------------------------------------------------
@@ -1055,18 +1255,32 @@ def tailor_export(job_uid: str, content: str = "") -> Response:
 
 
 def apply_profile_bundle() -> dict:
-    """网申资料：配置中心填的结构化字段 + 简历正文兜底。"""
+    """网申资料：配置中心填的结构化字段 + 简历正文兜底 + 本机学会的字段。"""
     settings = ApplyProfileSettings.load()
     resume = str(SearchConfigRow.load().get("resume_text") or "")
-    profile = ApplyProfile.from_sources(settings, resume)
+    profile = ApplyProfile.from_sources(settings, resume, learned=learned_values())
+    learned_rows = _dedupe_learned(ApplyLearnedRow.rows())
+    labels = dict(ApplyProfileSettings.LABELS)
+    # 取值用 profile 的：配置里没填、从简历正文兜底捞出来的那份也要带上，
+    # 否则对照表里换一条资料时，值会被悄悄清空
+    values = {key: str(value or "") for key, value in profile.values().items()}
+    for key in ApplyProfileSettings.LABELS:
+        values.setdefault(key, "")
     return {
-        "labels": ApplyProfileSettings.LABELS,
-        "values": {
-            key: str(getattr(settings, key, "") or "") for key in ApplyProfileSettings.LABELS
-        },
-        "extra": dict(settings.extra),
+        "labels": labels,
+        "values": values,
         "ready": settings.ready,
+        # 界面按组渲染 100+ 个字段，分组信息由后端给，前端不再各存一份。
+        "groups": [
+            {"title": title, "keys": [key for key, _ in fields]}
+            for title, fields in ApplyProfileSettings.GROUPS
+        ],
         "entries": [entry.to_dict() for entry in profile.entries],
+        # 本机学会的字段：在别家官网手工补过、资料库里本来没有的那几条。
+        "learned": _learned_for_display(learned_rows),
+        # 信息树：分组 → 字段 → 别名，给配置中心的「树形」视图用（和上面的
+        # labels / values 同源，只是把「这条打哪来、还认下过哪些叫法」一并摆出来）。
+        "tree": _apply_tree(settings, profile, learned_rows),
     }
 
 
@@ -1076,28 +1290,298 @@ def get_apply_profile() -> dict:
     return apply_profile_bundle()
 
 
+def _apply_tree(
+    settings: ApplyProfileSettings,
+    profile: ApplyProfile,
+    learned_rows: list[dict],
+) -> dict:
+    """信息树：分组 → 字段 → 别名，给配置中心的「树形」视图用。
+
+    和 :func:`apply_profile_bundle` 的 labels / values 同源，多出来的是三样东西：
+    每条资料的**来源**（资料 / 简历 / 推算 / 记忆 / 自定义）、**推算依据**，以及
+    这条认下过的**别名**（共指项）。字段本身是叶子，可在树上就地改；别名可以
+    手动合并 / 撤销——合并结果交给 :func:`job.apply.knowledge.canonical_key`，
+    这样「专业类别 / 专业类 / major_category」不会在库里存成三条。
+    """
+    entries = {entry.key: entry for entry in profile.entries}
+    # 待归并：内置别名表认不出、用户也还没合并过的那些键（官网怪叫法）
+    candidates = (
+        list(ApplyProfileSettings.LABELS)
+        + [str(row.get("key") or "") for row in learned_rows]
+    )
+    orphans = set(knowledge.orphan_keys(candidates))
+    merged = knowledge.user_aliases()
+
+    def leaf(key: str, label: str, value: str, source: str, note: str, *, kind: str) -> dict:
+        """一个字段节点。"""
+        canonical = knowledge.canonical_key(key) or key
+        aliases = [
+            {"text": alias, "builtin": alias in knowledge.KEY_ALIASES.get(canonical, ())}
+            for alias in knowledge.aliases_of(key)
+        ]
+        return {
+            "key": key,
+            "label": label or key,
+            "value": str(value or ""),
+            "filled": bool(str(value or "").strip()),
+            "source": source,
+            "note": note,
+            "aliases": aliases,
+            "canonical": canonical,
+            # 待归并：这条的叫法内置表认不出、用户也没合并过，树上标一下请人指认
+            "orphan": key in orphans and canonical == key,
+            "kind": kind,
+            # 这条的值是本机在别的官网学到 / 模型推出来的（不是资料里写的）
+            "memory": False,
+            # 这条的值是模型推的、用户还没核对过（树上标「待核对」）
+            "pending": False,
+        }
+
+    # 学到 / 推出来的那批按规范键归拢：一个规范键只留最近的一条（手填的压过推算的）。
+    # 官网上「身高(厘米)」和内置的「身高」是同一件事，同义归并后键会撞在一起；各长一片
+    # 叶子的话，库里就会并排出现两条同值资料。
+    memory: dict[str, dict] = {}
+    for row in learned_rows:
+        leaf_row = _leaf_from_learned(row)
+        current = memory.get(leaf_row["canonical"])
+        if current is None or (current["source"] == "AI推算" and leaf_row["source"] != "AI推算"):
+            memory[leaf_row["canonical"]] = leaf_row
+
+    builtin_keys = set(ApplyProfileSettings.LABELS)
+    # 内置分组里已经有值的那几个规范键：AI 推理不必再为它们另起一片叶子
+    settled: set[str] = set()
+
+    groups: list[dict] = []
+    for title, fields in ApplyProfileSettings.GROUPS:
+        rows = []
+        for key, label in fields:
+            entry = entries.get(key)
+            value = entry.value if entry else ""
+            source = entry.source if entry else "未填"
+            note = entry.note if entry else ""
+            canonical = knowledge.canonical_key(key) or key
+            memo = memory.get(canonical)
+            node = leaf(key, label, value, source, note, kind="field")
+            if memo is not None and node["source"] == "记忆":
+                # 这条的值不是资料里写的，是本机学到 / 模型推的。资料组装时一律写成
+                # 「记忆」，这里按学到的那条还原来源，模型推的还得留个「待核对」。
+                _absorb(node, memo)
+            if memo is not None and not node["filled"]:
+                # 资料里空着，但本机在别的官网学到过：并到同一个叶子上，不再单独长一片。
+                # 这样「身高」在库里只有一条，填的时候也还是同一个键。
+                node["value"] = memo["value"]
+                node["filled"] = True
+                _absorb(node, memo)
+            if node["filled"]:
+                settled.add(canonical)
+            rows.append(node)
+        groups.append({"title": title, "kind": "group", "fields": rows})
+
+    def learned_leaves(rows: list[dict], skip: set[str]) -> list[dict]:
+        """学到的一批摊成叶子，同一个规范键只留一条；``skip`` 里的规范键上面已经并过了。
+
+        ``learned_rows`` 已按时间倒序，所以同一个键留下的是最近学到的那条。
+        """
+        out: list[dict] = []
+        seen: set[str] = set()
+        for row in rows:
+            leaf_row = _leaf_from_learned(row)
+            canonical = leaf_row["canonical"]
+            if canonical in seen or canonical in skip:
+                continue
+            seen.add(canonical)
+            out.append(leaf_row)
+        return out
+
+    # 内置字典里有的键，值已经并进上面那片叶子了，不再重复长一片
+    learned = learned_leaves(
+        [row for row in learned_rows if row.get("source") != "AI推算"],
+        skip=builtin_keys,
+    )
+    if learned:
+        groups.append({"title": "本机学会", "kind": "learned", "fields": learned})
+
+    # AI 推理只留「库里还空着」的那些：已经有值（资料写的或本机学到的）就不必再核对了
+    inferred = learned_leaves(
+        [row for row in learned_rows if row.get("source") == "AI推算"],
+        skip=settled,
+    )
+    if inferred:
+        groups.append({"title": "AI 推理（待核对）", "kind": "inferred", "fields": inferred})
+
+    return {
+        "groups": groups,
+        "merges": dict(merged),
+        "orphans": sorted(orphans),
+    }
+
+
+def _leaf_from_learned(row: dict) -> dict:
+    """把一条「本机学会的字段」摊成树上的叶子节点。"""
+    key = str(row.get("key") or "")
+    # 官网上那一栏叫什么，不等于这条资料叫什么。学到「身高(厘米)」时树上该按内置的
+    # 「身高」显示——否则同一件事会在树上并排出现「身高」和「身高(厘米)」两条。
+    canonical = knowledge.canonical_key(key) or key
+    aliases = [
+        {"text": alias, "builtin": alias in knowledge.KEY_ALIASES.get(canonical, ())}
+        for alias in knowledge.aliases_of(key)
+    ]
+    return {
+        "key": key,
+        "label": ApplyProfileSettings.LABELS.get(canonical) or str(row.get("label") or "") or key,
+        "value": str(row.get("value") or ""),
+        "filled": True,
+        "source": str(row.get("source") or "手动"),
+        "note": str(row.get("basis") or ""),
+        "aliases": aliases,
+        "canonical": canonical,
+        "orphan": False,
+        "kind": "learned",
+        # 这一栏整枝就是「待核对」，叶子本身不用再标一遍
+        "pending": False,
+        "domain": str(row.get("domain") or ""),
+        "updated_at": str(row.get("updated_at") or ""),
+    }
+
+
+# 学到的那条没写「依据」时，按来源给一句对得上的兜底说明
+_MEMORY_NOTE = {
+    "AI推算": "模型按你已有的资料推的，还没核对过",
+    "手动": "在别的官网手工填过，本机记下来了",
+}
+
+
+def _absorb(node: dict, memo: dict) -> None:
+    """把「本机学到的那条」的来龙去脉挪到内置字段这片叶子上（就地改 ``node``）。
+
+    学到的东西本来就该归到它那条资料上，别再另长一片叶子——否则「身高」在库里
+    会有两条。来源、依据、站点、时间都得跟着过来，用户才知道这条打哪来、能不能删；
+    模型推的还要挂个「待核对」。
+    """
+    node["source"] = memo["source"]
+    node["note"] = memo["note"] or _MEMORY_NOTE.get(memo["source"], "本机记下来了")
+    node["memory"] = True
+    node["pending"] = memo["source"] == "AI推算"
+    node["forget_key"] = memo["key"]
+    node["domain"] = memo.get("domain", "")
+    node["updated_at"] = memo.get("updated_at", "")
+
+
+def _dedupe_learned(rows: list[dict]) -> list[dict]:
+    """同一个规范键只留一条。
+
+    官网上那栏叫「身高(厘米)」，库里叫 ``height``，同一件事；两条并排摆着就是重复。
+    ``rows`` 已按更新时间倒序，所以留下的是最近那条，手填的压过模型推的。
+    """
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        raw = str(row.get("key") or "")
+        canonical = knowledge.canonical_key(raw) or raw
+        old = best.get(canonical)
+        if old is None:
+            best[canonical] = row
+            order.append(canonical)
+        elif old.get("source") == "AI推算" and row.get("source") != "AI推算":
+            best[canonical] = row
+    return [best[canonical] for canonical in order]
+
+
+def _learned_for_display(rows: list[dict]) -> list[dict]:
+    """配置中心里「本机学会」那一栏该列什么。
+
+    资料库里本来就有这一栏的（身高、婚姻状况……）已经并回内置那片叶子上了，界面上
+    就在它自己的分组里显示成「记忆」来源、模型推的还挂着「待核对」，这里再列一遍
+    纯属重复——同一件事在同一屏里出现两次，用户会以为库里存了两条。
+
+    留在这儿的只有内置字典里没有的键（官网自定的怪栏位）：那些在分组里没有归宿，
+    只能单列一区，删也只能在这儿删。
+    """
+    out: list[dict] = []
+    for row in _dedupe_learned(rows):
+        raw = str(row.get("key") or "")
+        canonical = knowledge.canonical_key(raw) or raw
+        if canonical in ApplyProfileSettings.LABELS:
+            continue
+        out.append(row)
+    return out
+
+
+class ApplyAliasIn(BaseModel):
+    """一条「这两个叫法指的是同一条资料」的合并关系。"""
+
+    alias: str = ""
+    key: str = ""
+
+
+@app.post("/api/config/apply-alias")
+def merge_apply_alias(body: ApplyAliasIn) -> dict:
+    """把 ``alias`` 并到 ``key`` 上：之后归并、填写都认这一条。"""
+    init_db()
+    if not ApplyAliasRow.merge(body.alias, body.key):
+        raise ApiError("这两条不能合并（叫法为空、彼此相同，或已经反向合并过）")
+    knowledge.set_user_aliases(None)
+    return apply_profile_bundle()
+
+
+@app.delete("/api/config/apply-alias/{alias}")
+def unmerge_apply_alias(alias: str) -> dict:
+    """撤销一条手动合并关系。"""
+    init_db()
+    ApplyAliasRow.unmerge(alias)
+    knowledge.set_user_aliases(None)
+    return apply_profile_bundle()
+
+
 class ApplyProfileIn(BaseModel):
-    # 键为字段名（自定义补充字段用 ``extra:名称``），只更新传上来的键
+    # 键为字段名，只更新传上来的键
     values: dict[str, str] = Field(default_factory=dict)
 
 
 @app.put("/api/config/apply-profile")
 def put_apply_profile(body: ApplyProfileIn) -> dict:
-    """保存网申资料：没传的字段保持原样，空的补充字段直接删掉。"""
+    """保存网申资料：没传的字段保持原样。"""
     data = ApplyProfileSettings.load().model_dump()
     for key, raw in body.values.items():
         text = str(raw or "").strip()
         if key in ApplyProfileSettings.LABELS:
             data[key] = text
-        elif key.startswith("extra:"):
-            name = key.removeprefix("extra:").strip()
-            if not name:
-                continue
-            if text:
-                data["extra"][name] = text
-            else:
-                data["extra"].pop(name, None)
     ApplyProfileSettings(**data).save()
+    return apply_profile_bundle()
+
+
+@app.delete("/api/config/apply-learned")
+def clear_apply_learned() -> dict:
+    """清空「本机学会的字段」：整表删掉，下次重新学。"""
+    ApplyLearnedRow.clear()
+    return apply_profile_bundle()
+
+
+@app.delete("/api/config/apply-learned/{key}")
+def forget_apply_learned(key: str) -> dict:
+    """忘掉学到的某一条：用户觉得这条不该被记下来时用。"""
+    ApplyLearnedRow.forget(key)
+    return apply_profile_bundle()
+
+
+class ApplyLearnConfirmIn(BaseModel):
+    """「这条模型推得对，留下」的确认。"""
+
+    key: str = ""
+
+
+@app.post("/api/config/apply-learned/confirm")
+def confirm_apply_learned(body: ApplyLearnConfirmIn) -> dict:
+    """核对过一条 AI 推理：推得对的走这里，推得不对的走删除。
+
+    确认之后树上那片叶子的「待核对」就撤掉了，来源从「AI推算」变成「手动」——
+    对这条负责的从模型换成用户本人。
+    """
+    key = (body.key or "").strip()
+    if not key:
+        raise ApiError("缺少要确认的字段名")
+    if not ApplyLearnedRow.confirm(key):
+        raise ApiError("这条已经不在库里了，或者本来就不是模型推的")
     return apply_profile_bundle()
 
 
@@ -1147,7 +1631,9 @@ async def apply_open(body: ApplyTaskIn) -> dict:
     if not uid and not url:
         raise ApiError("请先填写企业官网的网申地址")
     runtime.push_log(f"网申：正在打开 {url or '上次填过的网申地址'}…")
-    return await _apply_call("打开网申页面", lambda: runtime.apply_assistant.open_task(uid, url))
+    return await _apply_call(
+        "打开网申页面", lambda: runtime.apply_assistant.open_task(uid, url, defer=True)
+    )
 
 
 class ApplyUrlIn(BaseModel):
@@ -1167,24 +1653,48 @@ def apply_set_url(uid: str, body: ApplyUrlIn) -> dict:
 @app.post("/api/apply/task/{uid}/scan")
 async def apply_scan(uid: str) -> dict:
     """重扫当前页面：官网表单常在填了一栏之后才展开下一栏。"""
-    return await _apply_call("扫描表单", lambda: runtime.apply_assistant.scan(uid))
+    return await _apply_call(
+        "扫描表单", lambda: runtime.apply_assistant.scan(uid, defer=True)
+    )
 
 
 class ApplyFillIn(BaseModel):
     # 前端改过的行：``[{"index": 3, "key": "name", "filled": "张三"}]``
     fields: list[dict[str, Any]] = Field(default_factory=list)
+    # 用户在「AI 推理（请核对）」里删掉的行序号：不填进页面，也不回流进资料库
+    rejected: list[int] = Field(default_factory=list)
+
+
+@app.post("/api/apply/task/{uid}/confirm")
+async def apply_confirm(uid: str) -> dict:
+    """在对照表上确认清单：把任务往前推一关，之后填表 / 重启都能从这一关接着跑。"""
+    saved = await _apply_call("确认清单", lambda: runtime.apply_assistant.confirm(uid))
+    runtime.push_log(f"网申已确认：{saved.get('title') or saved.get('uid') or ''}")
+    return saved
 
 
 @app.post("/api/apply/task/{uid}/fill")
 async def apply_fill(uid: str, body: ApplyFillIn) -> dict:
     """把对照表填进页面；只填不提交，提交按钮永远留给用户点。"""
-    result = await _apply_call("填写表单", lambda: runtime.apply_assistant.fill(uid, body.fields))
+    result = await _apply_call(
+        "填写表单",
+        lambda: runtime.apply_assistant.fill(uid, body.fields, body.rejected, defer=True),
+    )
+    if result.get("pending"):
+        # 填表链（逐栏写 + AI 接手补全）少说一分钟，挂后台跑，跑完广播刷新面板
+        runtime.push_log("网申填表：已开始往浏览器里填，填完会自动刷新")
+        return result
     outcome = result.get("outcome") or {}
     runtime.push_log(
         f"网申填表：已填 {outcome.get('filled', 0)} 项，"
         f"跳过 {outcome.get('skipped', 0)} 项，"
         f"待手动 {outcome.get('failed', 0)} 项"
     )
+    if outcome.get("flagged"):
+        runtime.push_log(f"网申填表：官网提示 {outcome['flagged']} 项需要核对")
+    learned = result.get("inferred") or []
+    if learned:
+        runtime.push_log(f"网申学习：认可 {len(learned)} 条 AI 推算")
     return result
 
 
@@ -1194,6 +1704,34 @@ async def apply_submit(uid: str) -> dict:
     saved = await _apply_call("标记提交", lambda: runtime.apply_assistant.submit(uid))
     runtime.push_log(f"网申已完成：{saved.get('title') or saved.get('uid') or ''}")
     return saved
+
+
+@app.post("/api/apply/task/{uid}/reopen")
+async def apply_reopen(uid: str) -> dict:
+    """撤销「已提交」：误点之后退回上一步，接着填表或重新提交。"""
+    saved = await _apply_call("撤销提交", lambda: runtime.apply_assistant.reopen(uid))
+    runtime.push_log(f"网申已撤销提交：{saved.get('title') or saved.get('uid') or ''}")
+    return saved
+
+
+@app.post("/api/apply/task/{uid}/captcha")
+async def apply_captcha(uid: str) -> dict:
+    """让 AI 读图识别验证码并填进输入框；识别不出就如实回报，请用户手动填。"""
+    bundle = await _apply_call("识别验证码", lambda: runtime.apply_assistant.solve_captcha(uid))
+    captcha = bundle.get("captcha") or {}
+    runtime.push_log(f"验证码识别：{captcha.get('message') or ''}")
+    return {"captcha": captcha, "task": bundle.get("task") or {}}
+
+
+@app.post("/api/apply/task/{uid}/learn")
+async def apply_learn(uid: str) -> dict:
+    """学习手填内容：把官网页面和本机资料库逐栏比一遍，学新的、纠错的。"""
+    bundle = await _apply_call("学习手填内容", lambda: runtime.apply_assistant.learn_now(uid))
+    added = bundle.get("added") or []
+    fixed = bundle.get("fixed") or []
+    if added or fixed:
+        runtime.push_log(f"网申学习：新学 {len(added)} 条、纠正 {len(fixed)} 条")
+    return bundle
 
 
 @app.delete("/api/apply/task/{uid}")

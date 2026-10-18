@@ -2,6 +2,8 @@
 $env:PYTHONUTF8 = "1"          # 中文 Windows 默认 GBK，Python 读 UTF-8 文件会炸
 Set-Location $PSScriptRoot
 
+$Background = ($args -contains "-Background") -or ($env:JOB_COURIER_BACKGROUND -eq "1")
+
 Write-Host ""
 Write-Host "  JobCourier 启动中..." -ForegroundColor Cyan
 Write-Host "  前后端都在 http://127.0.0.1:8000，不需要管其他端口。" -ForegroundColor DarkGray
@@ -12,7 +14,7 @@ Write-Host ""
 # 首次启动：缺什么补什么（后端 .venv、前端 node_modules、前端产物 dist）
 if (-not (Test-Path "$PSScriptRoot\.venv\Scripts\python.exe")) {
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        Write-Host "  未找到 uv，请先安装：https://docs.astral.sh/uv/" -ForegroundColor Yellow
+        Write-Host "  未找到 uv，请先安装 uv 后重开终端。" -ForegroundColor Yellow
         pause
         exit 1
     }
@@ -33,6 +35,21 @@ if (-not (Test-Path "$PSScriptRoot\frontend\dist\index.html")) {
 }
 
 # 后端起来后再自动开浏览器，避免又看到"正在启动"卡住
+if ($Background) {
+    # 后台跑：隐藏启动，不留命令行窗口；日志固定写 user_data\logs\backend.log。
+    # JOB_COURIER_BACKGROUND 是关键开关——虚拟环境的 pythonw.exe 只是转发壳，进程
+    # 照样挂着（隐藏的）控制台，只凭"有没有终端"判断会让日志找不到落点。
+    $env:JOB_COURIER_BACKGROUND = "1"
+    $proc = Start-Process -FilePath "$PSScriptRoot\.venv\Scripts\python.exe" `
+        -ArgumentList "main.py", "--background" `
+        -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
+    Write-Host "  JobCourier 已在后台启动（PID $($proc.Id)），不会留下任何窗口。" -ForegroundColor Green
+    Write-Host "  打开面板：http://127.0.0.1:8000" -ForegroundColor DarkGray
+    Write-Host "  运行日志：user_data\logs\backend.log" -ForegroundColor DarkGray
+    Write-Host "  停止服务：Stop-Process -Id $($proc.Id)" -ForegroundColor DarkGray
+    exit 0
+}
+
 $opener = Start-Job {
     for ($i = 0; $i -lt 150; $i++) {
         Start-Sleep -Seconds 2

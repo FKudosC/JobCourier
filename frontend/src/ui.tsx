@@ -9,6 +9,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
 import { Check, ChevronDown, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /* ---- 设计令牌（与 theme.css 的 :root 一一对应） ---- */
 
@@ -501,6 +502,218 @@ export function Dropdown({
   );
 }
 
+/* ---- 下拉单选（可搜索 + 分组） ---- */
+
+export interface ComboGroup {
+  title: string;
+  options: string[];
+}
+
+/** 浮层挂到哪：优先挂进所在的对话框，免得被里面的滚动容器裁掉，也躲开焦点陷阱。 */
+function popHost(el: HTMLElement | null): HTMLElement {
+  return (el?.closest('[role="dialog"]') as HTMLElement | null) ?? document.body;
+}
+
+function ComboItem({
+  label,
+  active,
+  onPick,
+}: {
+  label: string;
+  active: boolean;
+  onPick: (v: string) => void;
+}) {
+  return (
+    <div
+      className="g-menu-item"
+      data-active={active ? "1" : undefined}
+      style={active ? { color: ACCENT_DEEP, fontWeight: 600, background: ACCENT_TINT } : undefined}
+      onClick={() => onPick(label)}
+    >
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {active && <Check size={14} className="shrink-0" />}
+    </div>
+  );
+}
+
+/**
+ * 单选下拉，带搜索框和分组标题。选项上百条（网申资料 121 项）时用它，
+ * 原生 ``select`` 那个长条列表滚都滚不明白。
+ */
+export function ComboSelect({
+  value,
+  groups,
+  extra = [],
+  onChange,
+  placeholder = "选择",
+  variant = "field",
+}: {
+  value: string;
+  groups: ComboGroup[];
+  /** 置顶的固定项，例如「不填」。 */
+  extra?: string[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+  /** field：整块输入框的样子；link：一行小字，点开才展开列表。 */
+  variant?: "field" | "link";
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [box, setBox] = useState<{
+    host: HTMLElement;
+    left: number;
+    top: number;
+    width: number;
+    max: number;
+  } | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = btnRef.current;
+    if (!el) return;
+    const host = popHost(el);
+    const hostRect = host.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    const below = host.clientHeight - (rect.bottom - hostRect.top) - 8;
+    const above = rect.top - hostRect.top - 8;
+    // 下面放不下就往上翻，高度按可用空间收
+    const flip = below < 220 && above > below;
+    const max = Math.max(180, Math.min(320, flip ? above : below));
+    // link 形态的按钮很窄，浮层给个最小宽度，并夹在对话框里别越界
+    const width = variant === "link" ? Math.max(rect.width, 240) : rect.width;
+    const left = Math.max(4, Math.min(rect.left - hostRect.left, host.clientWidth - width - 8));
+    setBox({
+      host,
+      left,
+      top: flip ? Math.max(4, above - max) : rect.bottom - hostRect.top + 4,
+      width,
+      max,
+    });
+    setQuery("");
+    const raf = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      menuRef.current?.querySelector('[data-active="1"]')?.scrollIntoView({ block: "nearest" });
+    });
+    // 点外面、换窗口大小、外面滚动都收起来；浮层自己滚不算
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onScroll = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    document.addEventListener("pointerdown", onDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, variant]);
+
+  const q = query.trim();
+  const pinned = extra.filter((o) => !q || o.includes(q));
+  const shown = groups
+    .map((g) => ({ title: g.title, options: g.options.filter((o) => !q || o.includes(q)) }))
+    .filter((g) => g.options.length > 0);
+  const nothing = pinned.length === 0 && shown.length === 0;
+
+  function pick(v: string) {
+    onChange(v);
+    setOpen(false);
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={
+          variant === "link"
+            ? "t-micro inline-flex max-w-full cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 text-left outline-none hover:bg-[var(--soft)]"
+            : "g-field g-input flex w-full cursor-pointer items-center gap-2 text-left outline-none"
+        }
+        style={
+          variant === "link"
+            ? { color: ACCENT_DEEP, background: open ? ACCENT_TINT : undefined }
+            : open
+              ? { borderColor: ACCENT, background: SURFACE, boxShadow: `0 0 0 3px ${ACCENT_TINT}` }
+              : undefined
+        }
+      >
+        <span
+          className="min-w-0 flex-1 truncate"
+          style={variant === "link" ? undefined : { color: value ? INK : FAINT }}
+        >
+          {value || placeholder}
+        </span>
+        <ChevronDown size={variant === "link" ? 12 : 14} className="shrink-0" style={{ color: FAINT }} />
+      </button>
+      {open &&
+        box &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="g-menu g-scroll overflow-y-auto"
+            style={{
+              position: "absolute",
+              left: box.left,
+              top: box.top,
+              width: box.width,
+              maxHeight: box.max,
+              zIndex: "var(--z-pop)",
+            }}
+          >
+            <div className="px-1.5 pb-1.5 pt-0.5">
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setOpen(false);
+                  if (e.key === "Enter") {
+                    const first = pinned[0] ?? shown[0]?.options[0];
+                    if (first) pick(first);
+                  }
+                }}
+                placeholder="搜资料项…"
+                className="g-field g-input w-full outline-none"
+              />
+            </div>
+            {nothing && (
+              <div className="t-meta px-3 py-2" style={{ color: FAINT }}>
+                没有匹配的资料项
+              </div>
+            )}
+            {pinned.map((o) => (
+              <ComboItem key={o} label={o} active={o === value} onPick={pick} />
+            ))}
+            {shown.map((g) => (
+              <div key={g.title}>
+                <div className="t-eyebrow px-2.5 pb-1 pt-2" style={{ color: FAINT }}>
+                  {g.title}
+                </div>
+                {g.options.map((o) => (
+                  <ComboItem key={o} label={o} active={o === value} onPick={pick} />
+                ))}
+              </div>
+            ))}
+          </div>,
+          box.host,
+        )}
+    </>
+  );
+}
+
 /* ---- 下拉多选（带搜索） ---- */
 
 export function ComboMulti({
@@ -676,6 +889,7 @@ export function SlideOver({
   children,
   footer,
   width = 660,
+  dismissible = true,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -684,9 +898,18 @@ export function SlideOver({
   children: React.ReactNode;
   footer?: React.ReactNode;
   width?: number;
+  /**
+   * 点遮罩 / 按 Esc 能不能关。默认能关；面板里装的是「正在编辑的活」时关成
+   * false——误点一下旁边就把活关了、重开还得从头再跑一遍，很气人。
+   * 关掉之后只有右上角的 × 能关（× 永远有效，绝不会把面板锁死）。
+   */
+  dismissible?: boolean;
 }) {
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={onOpenChange}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="g-overlay" />
         <Dialog.Content
@@ -697,6 +920,12 @@ export function SlideOver({
             background: "var(--sheet)",
             borderLeft: `1px solid ${BORDER_STRONG}`,
             boxShadow: "var(--sh-pop)",
+          }}
+          onInteractOutside={(e) => {
+            if (!dismissible) e.preventDefault();
+          }}
+          onEscapeKeyDown={(e) => {
+            if (!dismissible) e.preventDefault();
           }}
           aria-describedby={undefined}
         >
